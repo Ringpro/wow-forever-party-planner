@@ -1,0 +1,12 @@
+{
+  "name": "@party/addon",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "node scripts/check.mjs",
+    "test": "node scripts/check.mjs"
+  },
+  "devDependencies": {
+    "luaparse": "^0.3.1"
+  }
+}

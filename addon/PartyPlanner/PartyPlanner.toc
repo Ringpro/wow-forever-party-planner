@@ -1,0 +1,13 @@
+## Interface: 16001
+## AllowLoadGameType: forever
+## Title: Party Planner
+## Notes: See which quests you share with your group. Companion to the Party Planner website and Discord app.
+## Author: Party Planner contributors
+## Version: 0.1.0
+## SavedVariables: PartyPlannerDB
+## Category: Quests
+
+Core.lua
+Snapshot.lua
+Comms.lua
+Commands.lua

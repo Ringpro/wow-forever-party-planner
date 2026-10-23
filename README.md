@@ -19,7 +19,7 @@ A small, free scheduling tool for groups of World of Warcraft players with littl
 
 ## Planned
 
-Reminders, choosing which groups see a single day, characters and levels, and later a WoW addon. See [docs/prd.md](docs/prd.md) for the full plan.
+Reminders, choosing which groups see a single day, characters and levels. An early WoW Forever addon is in `addon/` and will be tested in-game after launch. See [docs/prd.md](docs/prd.md) for the full plan.
 
 ## Tech
 
@@ -30,6 +30,7 @@ Astro (server-rendered) running as one Cloudflare Worker, with Cloudflare D1 as 
 | `apps/web` | The Worker: website, Discord interactions endpoint, minute cron |
 | `packages/domain` | Business rules: time zones, availability, best start time, sharing (pure TypeScript) |
 | `packages/db` | Drizzle schema and D1 migrations |
+| `addon/` | WoW Forever addon: share quests with your group ([details](addon/README.md)) |
 | `docs/` | Product brief, requirements, architecture, distribution |
 
 ## Running it locally

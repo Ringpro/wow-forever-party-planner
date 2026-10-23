@@ -25,7 +25,7 @@ Characters, levels, quests, the WoW addon, player discovery across groups, publi
 
 | # | Question (brief §13) | Decision |
 | --- | --- | --- |
-| 1 | What is "WoW Forever"? | **Still open.** Doesn't block the MVP. Must be answered before Phase 2 character fields are finalized and before any addon work. |
+| 1 | What is "WoW Forever"? | **Answered:** Blizzard's official third version of WoW (Classic-style, level 60, launches 4 Nov 2026), on the modern addon API. See [addon-feasibility.md](addon-feasibility.md). |
 | 2 | One server/ruleset/faction? | Assume it varies. Characters store version/ruleset, realm and faction (Phase 2). |
 | 3 | Start time only or windows? | *(proposed)* **Start time required for Yes/Maybe, end time optional.** No end time means the user's default session length (default 2 h). Windows can cross midnight (21:30–00:30). |
 | 4 | Carry over last week automatically? | *(proposed)* **No silent carry-over.** Explicit weekly defaults, plus a one-tap "Copy this week to next week". |
@@ -211,7 +211,6 @@ The detailed milestones and tests come in the implementation plan (brief §14, i
 
 ## 12. Still open
 
-- What "WoW Forever" is (blocks Phase 2 character fields and Phase 3).
 - Default minimum players for The Dads (3? 4?) and default evening range.
 - Whether planned sessions (N1) are needed in the pilot.
 - Product name.
