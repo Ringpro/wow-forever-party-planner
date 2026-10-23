@@ -85,6 +85,13 @@ You need a Cloudflare account (free plan is fine) and a Discord application.
 
 **Never commit secrets.** They belong in `wrangler secret` (production) or `apps/web/.dev.vars` (local, ignored by git). Client IDs, the Discord public key and D1 database IDs aren't secret.
 
+## Docs
+
+- [Product brief](docs/product-brief.md) and [requirements](docs/prd.md)
+- [Architecture](docs/architecture.md)
+- [Getting the Discord app and addon from the website](docs/distribution.md)
+- [WoW addon feasibility and launch-day checklist](docs/addon-feasibility.md)
+
 ## Contributing
 
 Issues and pull requests are welcome. Please run `pnpm typecheck` and `pnpm test` before opening a PR, and keep changes small and focused. For anything bigger, open an issue first so we can agree on the approach.
