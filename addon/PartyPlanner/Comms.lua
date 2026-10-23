@@ -154,6 +154,14 @@ ns.On(
   end)
 )
 
+-- After logging in or /reload while already grouped, no roster update fires, so ask for
+-- everyone's status ourselves (our own goes out via the login snapshot).
+ns.On("PLAYER_LOGIN", function()
+  if IsInGroup() then
+    ns.RequestStatus()
+  end
+end)
+
 ns.On("PLAYER_REGEN_ENABLED", function()
   if resendAfterCombat then
     resendAfterCombat = false

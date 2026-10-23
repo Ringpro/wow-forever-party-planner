@@ -42,6 +42,10 @@ The addon **can't make web requests**, so it can't sync with the website by itse
 - Sharing goes only to your current party or raid, people who already see your level and location. It can be turned off.
 - Follows Blizzard's UI Add-On Development Policy: free, readable code, no automation of gameplay.
 
+## Offline tests
+
+`pnpm --filter @party/addon test` runs the addon in simulated clients with a fake WoW API (see [addon/README.md](../addon/README.md)). They found one real gap before launch: after a `/reload` in a group, the addon didn't ask the others for their quests. Fixed.
+
 ## In-game checklist (launch day, 4 November)
 
 1. At launch: find the live install folder and `## Interface` number; update the TOC.

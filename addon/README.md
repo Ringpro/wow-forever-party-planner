@@ -32,4 +32,6 @@ No WoW client needed:
 pnpm --filter @party/addon test
 ```
 
-It checks that every file in the TOC parses as Lua 5.1 and that no file leaks global variables.
+It checks that every file in the TOC parses as Lua 5.1 and that no file leaks global variables, then runs the real addon code in several simulated players (`test/`): a fake WoW API (`fake-wow.lua`) with a quest log, groups, a clock and addon messages, running in real Lua through [wasmoon](https://github.com/ceifa/wasmoon). The tests cover the snapshot, sharing and splitting long quest lists, group changes, `/reload`, opting out, blocked sends during combat and malformed messages.
+
+The fake API follows the documented behaviour; the in-game checklist is still needed to confirm the real client matches it. The tests run on Lua 5.4 while WoW uses Lua 5.1; the parse check above makes sure the code is valid 5.1.
