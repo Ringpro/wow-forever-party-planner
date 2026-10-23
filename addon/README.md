@@ -2,7 +2,7 @@
 
 See which quests you share with your group. Works on its own; no website account needed.
 
-> **Status:** v0.1, written against the documented WoW Forever (Mainline) API. Being tested on the beta; see the checklist in [docs/addon-feasibility.md](../docs/addon-feasibility.md).
+> **Status:** v0.1, written against the documented WoW Forever (Mainline) API. The beta ended before it could be tried in-game; it gets tested at launch (4 November). See the checklist in [docs/addon-feasibility.md](../docs/addon-feasibility.md).
 
 ## What it does
 
@@ -14,7 +14,7 @@ See which quests you share with your group. Works on its own; no website account
 
 ## Installing for development
 
-Copy (or link) the `PartyPlanner` folder into your game's AddOns folder, so you end up with `.../Interface/AddOns/PartyPlanner/PartyPlanner.toc`. On the beta that's `World of Warcraft\_classic_beta_\Interface\AddOns\`. The live client's folder isn't known yet.
+Copy (or link) the `PartyPlanner` folder into your game's AddOns folder, so you end up with `.../Interface/AddOns/PartyPlanner/PartyPlanner.toc`. The beta used `World of Warcraft\_classic_beta_\Interface\AddOns\`; the live client's folder isn't known yet.
 
 On Windows, a directory junction keeps the game in sync with the repo (no admin needed). In PowerShell:
 

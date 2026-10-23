@@ -4,7 +4,7 @@
 
 ## What "WoW Forever" is
 
-**World of Warcraft: Forever** is Blizzard's official third permanent version of WoW, next to retail and Classic. It goes back to the original continents with a level cap of 60, adds new zones, quests and dungeons, and is included in a normal WoW subscription. Global launch is **4 November 2026**. The **beta is live until launch** (it installs as `_classic_beta_`, product `wow_classic_beta`, build 1.60.1.70532 on 23 Oct), so the addon can be tested now.
+**World of Warcraft: Forever** is Blizzard's official third permanent version of WoW, next to retail and Classic. It goes back to the original continents with a level cap of 60, adds new zones, quests and dungeons, and is included in a normal WoW subscription. Global launch is **4 November 2026**. The beta (installed as `_classic_beta_`, product `wow_classic_beta`, last build 1.60.1.70532) **ended on 23 October 2026**, so the next chance to test in-game is launch day.
 
 Sources: [Warcraft Wiki: Patch 1.60.1](https://warcraft.wiki.gg/wiki/Patch_1.60.1), [Patch 1.60.1 API changes](https://warcraft.wiki.gg/wiki/Patch_1.60.1/API_changes), [TechSpot](https://www.techspot.com/news/113832-world-warcraft-forever-launches-november-4-new-race.html), [Blizzard Watch](https://blizzardwatch.com/category/warcraft/wow-forever/).
 
@@ -42,7 +42,7 @@ The addon **can't make web requests**, so it can't sync with the website by itse
 - Sharing goes only to your current party or raid, people who already see your level and location. It can be turned off.
 - Follows Blizzard's UI Add-On Development Policy: free, readable code, no automation of gameplay.
 
-## In-game checklist (beta now, again at launch on 4 November)
+## In-game checklist (launch day, 4 November)
 
 1. At launch: find the live install folder and `## Interface` number; update the TOC.
 2. Load the addon, check for Lua errors (`/console scriptErrors 1`).
