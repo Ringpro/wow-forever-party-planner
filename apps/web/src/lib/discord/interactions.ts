@@ -15,7 +15,7 @@ import {
   setFreeNow,
   sharedGroupNames,
   shiftToday,
-  upcomingDays,
+  planningDays,
 } from "../server/availability.ts";
 import { boardForChannel, refreshBoardsFor, removeBoard, setupBoard } from "../server/boards.ts";
 import { getGroupAsMember, listMyGroups } from "../server/groups.ts";
@@ -108,7 +108,7 @@ async function planner(
   pendingStart?: string | null,
   notice?: string,
 ): Promise<MessagePayload> {
-  const days = upcomingDays(actor.timezone);
+  const days = planningDays(actor.timezone);
   const entries = new Map(
     [...(await myDays(db, actor.id, days))].flatMap(([d, a]) => (a.kind === "unknown" ? [] : [[d, a] as const])),
   );

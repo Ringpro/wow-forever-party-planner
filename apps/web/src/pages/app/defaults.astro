@@ -1,6 +1,6 @@
 ---
+import DayRow from "../../components/DayRow.astro";
 import Layout from "../../layouts/Layout.astro";
-import { DEFAULT_START, STATUS_ICON, STATUS_LABEL, TIME_OPTIONS } from "../../lib/format.ts";
 import { clearWeeklyDefault, getWeeklyDefaults, setWeeklyDefault } from "../../lib/server/availability.ts";
 import { refreshBoardsLater } from "../../lib/server/background.ts";
 import { getDb } from "../../lib/server/db.ts";
@@ -11,13 +11,13 @@ const db = getDb();
 let error: string | null = null;
 
 const WEEKDAYS = [
-  [1, "Monday"],
-  [2, "Tuesday"],
-  [3, "Wednesday"],
-  [4, "Thursday"],
-  [5, "Friday"],
-  [6, "Saturday"],
-  [7, "Sunday"],
+  [1, "Mon"],
+  [2, "Tue"],
+  [3, "Wed"],
+  [4, "Thu"],
+  [5, "Fri"],
+  [6, "Sat"],
+  [7, "Sun"],
 ] as const;
 
 if (Astro.request.method === "POST") {
@@ -45,50 +45,36 @@ if (Astro.request.method === "POST") {
 const defaults = await getWeeklyDefaults(db, user.id);
 ---
 
-<Layout title="Weekly defaults">
-  <h1>Weekly defaults</h1>
-  <p class="muted">
-    Your usual week. Defaults fill in any day you haven't answered, so you only need to change the exceptions.{" "}
-    <a href="/app">Back to my week</a>
-  </p>
-  {error && <p class="error">{error}</p>}
+<Layout title="Weekly defaults" active="schedule">
+  <div class="page-head">
+    <p class="small"><a href="/app">← Schedule</a></p>
+    <h1>Your usual week</h1>
+    <p class="muted small">
+      Defaults fill in every day you haven't answered, this week and next. Then you only change the exceptions.
+    </p>
+  </div>
 
-  {WEEKDAYS.map(([weekday, name]) => {
-    const d = defaults[weekday];
-    const status = d?.status ?? "unknown";
-    return (
-      <form method="post" class="card day" id={`w-${weekday}`}>
-        <input type="hidden" name="weekday" value={weekday} />
-        <div class="day-head">
-          <strong>{name}</strong>
-          <span class={`pill ${status}`}>
-            {d ? `${STATUS_ICON[d.status]} ${STATUS_LABEL[d.status]}` : "No default"}
-            {d?.startLocal && ` from ${d.startLocal}`}
-            {d?.endLocal && ` until ${d.endLocal}`}
-          </span>
-        </div>
-        <div class="times">
-          <label>
-            From
-            <select name="start">
-              {TIME_OPTIONS.map((t) => <option selected={t === (d?.startLocal ?? DEFAULT_START)}>{t}</option>)}
-            </select>
-          </label>
-          <label>
-            Until
-            <select name="end">
-              <option value="">—</option>
-              {TIME_OPTIONS.map((t) => <option selected={t === d?.endLocal}>{t}</option>)}
-            </select>
-          </label>
-        </div>
-        <div class="status-buttons">
-          <button class="status yes" name="status" value="yes" aria-pressed={status === "yes" ? "true" : "false"}>✓ Yes</button>
-          <button class="status maybe" name="status" value="maybe" aria-pressed={status === "maybe" ? "true" : "false"}>~ Maybe</button>
-          <button class="status no" name="status" value="no" aria-pressed={status === "no" ? "true" : "false"}>✗ No</button>
-          {d && <button class="status clear" name="status" value="clear">Clear</button>}
-        </div>
-      </form>
-    );
-  })}
+  <div id="flash">{error && <p class="error" role="alert">{error}</p>}</div>
+
+  <div class="day-list">
+    {WEEKDAYS.map(([weekday, name]) => {
+      const d = defaults[weekday];
+      return (
+        <DayRow
+          id={`w-${weekday}`}
+          title={name}
+          hidden={{ weekday }}
+          status={d?.status ?? "unknown"}
+          kind={d ? "explicit" : "unknown"}
+          start={d?.startLocal ?? null}
+          end={d?.endLocal ?? null}
+          canClear={Boolean(d)}
+        />
+      );
+    })}
+  </div>
 </Layout>
+
+<script>
+  import "../../scripts/rows.ts";
+</script>

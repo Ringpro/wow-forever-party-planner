@@ -9,6 +9,7 @@ import {
   groupWeek,
   myDays,
   myEntries,
+  planningWeeks,
   setAvailability,
   setFreeNow,
   setWeeklyDefault,
@@ -58,6 +59,15 @@ beforeAll(async () => {
 afterAll(async () => {
   vi.useRealTimers();
   await dispose();
+});
+
+describe("planning weeks", () => {
+  it("covers the rest of this week and all of next week", () => {
+    const [thisWeek, nextWeek] = planningWeeks(CPH);
+    expect(thisWeek!.days).toEqual(["2026-10-28", "2026-10-29", "2026-10-30", "2026-10-31", "2026-11-01"]);
+    expect(nextWeek!.days[0]).toBe("2026-11-02");
+    expect(nextWeek!.days).toHaveLength(7);
+  });
 });
 
 describe("membership boundaries", () => {

@@ -1,7 +1,7 @@
 ---
 import Layout from "../../layouts/Layout.astro";
-import { STATUS_ICON, STATUS_LABEL, dayLabel, timeIn } from "../../lib/format.ts";
-import { groupWeek } from "../../lib/server/availability.ts";
+import { STATUS_ICON, dayLabel, timeIn } from "../../lib/format.ts";
+import { groupWeek, planningWeeks } from "../../lib/server/availability.ts";
 import { refreshBoardsLater } from "../../lib/server/background.ts";
 import { getDb } from "../../lib/server/db.ts";
 import { getInviteToken, leaveGroup, makeAdmin, resetInvite, setSharing } from "../../lib/server/groups.ts";
@@ -26,110 +26,148 @@ if (Astro.request.method === "POST") {
       return Astro.redirect("/app");
     }
     refreshBoardsLater(Astro.locals, { groupIds: [groupId] });
-    return Astro.redirect(`/groups/${groupId}`);
+    return Astro.redirect(`/groups/${groupId}${Astro.url.search}`);
   } catch (e) {
     if (!(e instanceof UserError)) throw e;
     error = e.message;
   }
 }
 
-const week = await groupWeek(db, user, groupId);
+const weekKey = Astro.url.searchParams.get("week") === "next" ? "next" : "this";
+const weeks = planningWeeks(tz);
+const selected = weeks.find((w) => w.key === weekKey)!;
+const week = await groupWeek(db, user, groupId, selected.days);
 if (!week) return new Response("Not found", { status: 404 });
 const { group, membership } = week;
 const isAdmin = membership.role === "admin";
 const inviteUrl = isAdmin ? `${Astro.url.origin}/join/${await getInviteToken(db, user.id, groupId)}` : null;
+const today = weeks[0]!.days[0]!;
+const dow = (day: string) => dayLabel(day).slice(0, 3);
+const dom = (day: string) => String(Number(day.slice(8)));
+const span = (startsAt: number | null, endsAt: number | null) =>
+  startsAt === null ? "" : `${timeIn(startsAt, tz)}${endsAt !== null ? `–${timeIn(endsAt, tz)}` : ""}`;
 ---
 
 <Layout title={group.name}>
-  <h1>{group.name}</h1>
-  <p class="muted">
-    {week.members.length} {week.members.length === 1 ? "member" : "members"} · {group.minPlayers} needed for a session ·
-    times in {tz.replaceAll("_", " ")}
-  </p>
-  {error && <p class="error">{error}</p>}
+  <div class="page-head">
+    <p class="small"><a href="/app">← Schedule</a></p>
+    <h1>{group.name}</h1>
+    <p class="muted small">
+      {week.members.length} {week.members.length === 1 ? "member" : "members"} · {group.minPlayers} needed to play ·
+      times in {tz.replaceAll("_", " ")}
+    </p>
+  </div>
+
+  <div id="flash">{error && <p class="error" role="alert">{error}</p>}</div>
+
   {!membership.shareAvailability && (
-    <p class="notice">You're not sharing your availability with this group, so you show as "?" here.</p>
+    <p class="notice">You're not sharing your availability with this group, so you show as "no answer" here.</p>
   )}
 
   {week.freeNow.length > 0 && (
-    <p class="card">
-      🟢 <strong>Free now:</strong>
-      {week.freeNow.map((f) => `${f.displayName} (until ${timeIn(f.until, tz)})`).join(", ")}
-    </p>
+    <div class="card free-now">
+      <span class="dot" aria-hidden="true"></span>
+      <div>
+        <strong>Free right now</strong>
+        <div class="small">{week.freeNow.map((f) => `${f.displayName} (until ${timeIn(f.until, tz)})`).join(", ")}</div>
+      </div>
+    </div>
   )}
 
-  {week.days.map(({ day, members, counts, best }) => (
-    <section class="card day">
-      <div class="day-head">
-        <strong>{dayLabel(day)}</strong>
-        <span class="muted">✓ {counts.yes} · ~ {counts.maybe} · ? {counts.unknown}</span>
-      </div>
-      {best ? (
-        <p class={best.includesMaybe ? "best maybe" : "best yes"}>
-          {best.memberIds.length} can play from <strong>{timeIn(best.startsAt, tz)}</strong>
-          {best.includesMaybe && " (counting Maybes)"}
-          {best.memberIds.length >= 5 && !best.includesMaybe && " · full party"}
-        </p>
-      ) : (
-        <p class="best none">Not enough players yet</p>
-      )}
-      <ul class="members">
-        {members.map((m) => (
-          <li class={m.status}>
-            <span class={`pill ${m.status}${m.kind === "default" ? " default" : ""}`} title={m.kind === "default" ? "Weekly default" : undefined}>
-              {STATUS_ICON[m.status]} {STATUS_LABEL[m.status]}
-            </span>
-            <span>{m.displayName}</span>
-            {m.startsAt !== null && (
-              <span class="muted">
-                {timeIn(m.startsAt, tz)}–{m.endsAt !== null && timeIn(m.endsAt, tz)}
-              </span>
-            )}
-          </li>
-        ))}
-      </ul>
-    </section>
-  ))}
+  <nav class="tabs" aria-label="Week">
+    <a href="?week=this" aria-current={weekKey === "this" ? "page" : undefined}>This week</a>
+    <a href="?week=next" aria-current={weekKey === "next" ? "page" : undefined}>Next week</a>
+  </nav>
 
-  <section class="card stack">
-    <h2>Settings</h2>
-    <form method="post">
+  <div class="group-days">
+    {week.days.map(({ day, members, counts, best }) => {
+      const answered = members.filter((m) => m.status !== "unknown");
+      const unanswered = members.filter((m) => m.status === "unknown");
+      return (
+        <article class={`gday${best && !best.includesMaybe ? " enough" : best ? " possible" : ""}`}>
+          <div class="day-date">
+            <span class="dow">{dow(day)}</span>
+            <span class="dom">{dom(day)}</span>
+            {day === today && <span class="badge">Today</span>}
+          </div>
+          <div class="gday-body">
+            <div class="gday-sum">
+              {best ? (
+                <span>
+                  <strong class="best-time">{timeIn(best.startsAt, tz)}</strong>
+                  <span class="muted">
+                    {" "}· {best.memberIds.length} can play{best.includesMaybe && " if the Maybes come"}
+                  </span>
+                </span>
+              ) : (
+                <span class="muted">{counts.yes + counts.maybe === 0 ? "No one yet" : "Not enough players yet"}</span>
+              )}
+            </div>
+            {answered.length > 0 && (
+              <ul class="plain who">
+                {answered.map((m) => (
+                  <li
+                    class={`chip ${m.status}${m.kind === "default" ? " default" : ""}`}
+                    title={m.kind === "default" ? "Weekly default" : undefined}
+                  >
+                    {STATUS_ICON[m.status]} {m.displayName}
+                    {m.status !== "no" && m.startsAt !== null && <span class="t">{span(m.startsAt, m.endsAt)}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {unanswered.length > 0 && (
+              <p class="muted small no-answer">No answer: {unanswered.map((m) => m.displayName).join(", ")}</p>
+            )}
+          </div>
+        </article>
+      );
+    })}
+  </div>
+  <p class="muted small legend">Dashed outline = from someone's weekly default.</p>
+
+  <h2>Group settings</h2>
+  <div class="card stack">
+    <form method="post" class="setting-row">
       <input type="hidden" name="action" value="share" />
       <label class="check">
-        <input type="checkbox" name="share" checked={membership.shareAvailability} />
+        <input type="checkbox" name="share" checked={membership.shareAvailability} data-autosubmit />
         Share my availability with this group
       </label>
-      <button class="button secondary" type="submit">Save</button>
+      <noscript><button class="button secondary" type="submit">Save</button></noscript>
     </form>
 
     {inviteUrl && (
       <div>
         <h3>Invite link</h3>
-        <p class="muted">Anyone with this link can join. Reset it if it ends up somewhere it shouldn't.</p>
-        <input class="invite" readonly value={inviteUrl} onclick="this.select()" />
+        <p class="muted small">Anyone with this link can join. Reset it if it ends up somewhere it shouldn't.</p>
+        <div class="invite-row">
+          <input class="invite" readonly value={inviteUrl} data-select-on-click />
+          <button class="button secondary" type="button" data-copy={inviteUrl}>Copy</button>
+        </div>
         <form method="post">
           <input type="hidden" name="action" value="reset_invite" />
-          <button class="button secondary" type="submit">Reset link</button>
+          <button class="link small" type="submit">Reset link</button>
         </form>
       </div>
     )}
 
     <div>
       <h3>Members</h3>
-      <ul class="members">
+      <ul class="plain">
         {week.members.map((m) => (
-          <li>
+          <li class="list-row">
             <span>{m.displayName}</span>
             {m.role === "admin" ? (
-              <span class="muted">admin</span>
+              <span class="muted small">Admin</span>
+            ) : isAdmin ? (
+              <form method="post">
+                <input type="hidden" name="action" value="make_admin" />
+                <input type="hidden" name="memberId" value={m.userId} />
+                <button class="link small" type="submit">Make admin</button>
+              </form>
             ) : (
-              isAdmin && (
-                <form method="post">
-                  <input type="hidden" name="action" value="make_admin" />
-                  <input type="hidden" name="memberId" value={m.userId} />
-                  <button class="link" type="submit">Make admin</button>
-                </form>
-              )
+              <span class="muted small">Member</span>
             )}
           </li>
         ))}
@@ -140,5 +178,104 @@ const inviteUrl = isAdmin ? `${Astro.url.origin}/join/${await getInviteToken(db,
       <input type="hidden" name="action" value="leave" />
       <button class="button danger" type="submit">Leave group</button>
     </form>
-  </section>
+  </div>
 </Layout>
+
+<script>
+  for (const button of document.querySelectorAll("[data-copy]")) {
+    button.addEventListener("click", async () => {
+      await navigator.clipboard.writeText((button as HTMLElement).dataset.copy ?? "");
+      button.textContent = "Copied";
+      setTimeout(() => (button.textContent = "Copy"), 1500);
+    });
+  }
+  for (const input of document.querySelectorAll("[data-select-on-click]")) {
+    input.addEventListener("click", () => (input as HTMLInputElement).select());
+  }
+  for (const box of document.querySelectorAll("[data-autosubmit]")) {
+    box.addEventListener("change", () => (box as HTMLInputElement).form?.requestSubmit());
+  }
+</script>
+
+<style>
+  .free-now {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--yes);
+    box-shadow: 0 0 0 4px var(--yes-soft);
+    flex: none;
+  }
+  .group-days {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .gday {
+    display: grid;
+    grid-template-columns: 52px 1fr;
+    gap: 12px;
+    padding: 14px 16px 14px 13px;
+    border-top: 1px solid var(--border);
+    border-left: 3px solid transparent;
+  }
+  .gday:first-child {
+    border-top: 0;
+  }
+  .gday.enough {
+    border-left-color: var(--yes);
+  }
+  .gday.possible {
+    border-left-color: var(--maybe);
+  }
+  .gday-body {
+    min-width: 0;
+  }
+  .gday-sum {
+    min-height: 28px;
+    display: flex;
+    align-items: center;
+  }
+  .best-time {
+    font-size: 1.15rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .gday.enough .best-time {
+    color: var(--yes);
+  }
+  .gday.possible .best-time {
+    color: var(--maybe);
+  }
+  .who {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .who .t {
+    opacity: 0.85;
+    font-variant-numeric: tabular-nums;
+    margin-left: 2px;
+  }
+  .no-answer {
+    margin: 8px 0 0;
+  }
+  .legend {
+    margin-top: 8px;
+  }
+  .invite-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .setting-row {
+    margin: 0;
+  }
+</style>

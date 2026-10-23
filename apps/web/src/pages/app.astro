@@ -1,25 +1,25 @@
 ---
+import DayRow from "../components/DayRow.astro";
 import Layout from "../layouts/Layout.astro";
-import { DEFAULT_START, STATUS_ICON, STATUS_LABEL, TIME_OPTIONS, dayLabel } from "../lib/format.ts";
-import {
-  clearAvailability,
-  copyWeekForward,
-  myDays,
-  setAvailability,
-  upcomingDays,
-} from "../lib/server/availability.ts";
+import { dayLabel } from "../lib/format.ts";
+import { clearAvailability, copyWeekForward, myDays, planningWeeks, setAvailability } from "../lib/server/availability.ts";
 import { refreshBoardsLater } from "../lib/server/background.ts";
 import { getDb } from "../lib/server/db.ts";
 import { listMyGroups } from "../lib/server/groups.ts";
 import { UserError } from "../lib/server/users.ts";
+import { addDays } from "@party/domain";
 
 const user = Astro.locals.user!;
 const tz = user.timezone!;
 const db = getDb();
 let error: string | null = null;
-let notice: string | null = Astro.url.searchParams.get("copied")
-  ? `Copied ${Astro.url.searchParams.get("copied")} day(s) to next week.`
-  : null;
+const copied = Astro.url.searchParams.get("copied");
+const notice =
+  copied === null
+    ? null
+    : copied === "0"
+      ? "Nothing to copy: next week already has answers for those days, or this week is empty."
+      : `Copied ${copied} ${copied === "1" ? "day" : "days"} to next week.`;
 
 if (Astro.request.method === "POST") {
   const form = await Astro.request.formData();
@@ -27,9 +27,9 @@ if (Astro.request.method === "POST") {
   const status = String(form.get("status") ?? "");
   try {
     if (status === "copy_week") {
-      const copied = await copyWeekForward(db, user);
+      const count = await copyWeekForward(db, user);
       refreshBoardsLater(Astro.locals, { userId: user.id });
-      return Astro.redirect(`/app?copied=${copied}`);
+      return Astro.redirect(`/app?copied=${count}#week-next`);
     }
     if (status === "clear") {
       await clearAvailability(db, user.id, day);
@@ -54,78 +54,88 @@ if (Astro.request.method === "POST") {
   }
 }
 
-const days = upcomingDays(tz);
-const answers = await myDays(db, user.id, days);
+const weeks = planningWeeks(tz);
+const today = weeks[0]!.days[0]!;
+const answers = await myDays(db, user.id, weeks.flatMap((w) => w.days));
 const groups = await listMyGroups(db, user.id);
+const range = (monday: string) => `${dayLabel(monday).slice(4)} – ${dayLabel(addDays(monday, 6)).slice(4)}`;
+const dow = (day: string) => dayLabel(day).slice(0, 3);
+const dom = (day: string) => String(Number(day.slice(8)));
 ---
 
-<Layout title="My week">
-  <h1>My week</h1>
-  <p class="muted">
-    Times in {tz.replaceAll("_", " ")} · <a href="/onboarding?return_to=/app">change</a> ·
-    <a href="/app/defaults">weekly defaults</a>
-  </p>
-  {error && <p class="error">{error}</p>}
-  {notice && <p class="notice">{notice}</p>}
+<Layout title="Schedule" active="schedule">
+  <div class="page-head">
+    <h1>When can you play?</h1>
+    <p class="muted small">
+      Times in {tz.replaceAll("_", " ")} (<a href="/onboarding?return_to=/app">change</a>). Days you leave empty use your{" "}
+      <a href="/app/defaults">weekly defaults</a>.
+    </p>
+  </div>
 
-  {days.map((day) => {
-    const a = answers.get(day)!;
-    const isDefault = a.kind === "default";
-    const status = a.kind === "unknown" ? "unknown" : a.status;
-    const pressed = (s: string) => (a.kind === "explicit" && a.status === s ? "true" : "false");
-    return (
-      <form method="post" class="card day" id={`d-${day}`}>
-        <input type="hidden" name="day" value={day} />
-        <div class="day-head">
-          <strong>{dayLabel(day)}</strong>
-          <span class={`pill ${status}${isDefault ? " default" : ""}`}>
-            {a.kind === "unknown" ? "Not set" : `${STATUS_ICON[a.status]} ${STATUS_LABEL[a.status]}`}
-            {a.kind !== "unknown" && a.startLocal && ` from ${a.startLocal}`}
-            {a.kind !== "unknown" && a.endLocal && ` until ${a.endLocal}`}
-            {isDefault && " · default"}
-          </span>
-        </div>
-        <div class="times">
-          <label>
-            From
-            <select name="start">
-              {TIME_OPTIONS.map((t) => (
-                <option selected={t === ((a.kind !== "unknown" && a.startLocal) || DEFAULT_START)}>{t}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Until
-            <select name="end">
-              <option value="">—</option>
-              {TIME_OPTIONS.map((t) => <option selected={a.kind !== "unknown" && t === a.endLocal}>{t}</option>)}
-            </select>
-          </label>
-        </div>
-        <div class="status-buttons">
-          <button class="status yes" name="status" value="yes" aria-pressed={pressed("yes")}>✓ Yes</button>
-          <button class="status maybe" name="status" value="maybe" aria-pressed={pressed("maybe")}>~ Maybe</button>
-          <button class="status no" name="status" value="no" aria-pressed={pressed("no")}>✗ No</button>
-          {a.kind === "explicit" && <button class="status clear" name="status" value="clear">Clear</button>}
-        </div>
-      </form>
-    );
-  })}
+  <div id="flash">
+    {error && <p class="error" role="alert">{error}</p>}
+    {notice && <p class="notice">{notice}</p>}
+  </div>
 
-  <form method="post" class="copy-week">
-    <button class="button secondary" name="status" value="copy_week">Copy this week to next week</button>
-    <p class="muted">Copies your answers to the same days next week. Days you've already answered stay as they are.</p>
-  </form>
+  {weeks.map((week) => (
+    <section id={`week-${week.key}`}>
+      <div class="week-head">
+        <h2>
+          {week.key === "this" ? "This week" : "Next week"} <span class="muted small">{range(week.monday)}</span>
+        </h2>
+        {week.key === "next" && (
+          <form method="post">
+            <button class="link small" name="status" value="copy_week">Copy this week</button>
+          </form>
+        )}
+      </div>
+      <div class="day-list">
+        {week.days.map((day) => {
+          const a = answers.get(day)!;
+          return (
+            <DayRow
+              id={`d-${day}`}
+              title={dow(day)}
+              subtitle={dom(day)}
+              badge={day === today ? "Today" : undefined}
+              hidden={{ day }}
+              status={a.kind === "unknown" ? "unknown" : a.status}
+              kind={a.kind}
+              start={a.kind === "unknown" ? null : a.startLocal}
+              end={a.kind === "unknown" ? null : a.endLocal}
+              canClear={a.kind === "explicit"}
+              note={a.kind === "default" ? "From your weekly default" : undefined}
+            />
+          );
+        })}
+      </div>
+    </section>
+  ))}
 
-  <h2>My groups</h2>
-  {groups.length === 0 && <p class="muted">You're not in a group yet. Create one, or ask a friend for an invite link.</p>}
-  <ul class="group-list">
-    {groups.map((g) => (
-      <li>
-        <a href={`/groups/${g.id}`}>{g.name}</a>
-        {g.role === "admin" && <span class="muted"> · admin</span>}
-      </li>
-    ))}
-  </ul>
-  <a class="button secondary" href="/groups/new">Create a group</a>
+  <section>
+    <div class="week-head">
+      <h2>Your groups</h2>
+      <a class="small" href="/groups/new">New group</a>
+    </div>
+    <div class="card">
+      {groups.length === 0 ? (
+        <p class="muted" style="margin:0">
+          You're not in a group yet. <a href="/groups/new">Create one</a>, or ask a friend for an invite link.
+        </p>
+      ) : (
+        <ul class="plain">
+          {groups.map((g) => (
+            <li class="list-row">
+              <a href={`/groups/${g.id}`}>{g.name}</a>
+              <span class="muted small">{g.role === "admin" ? "Admin" : "Member"}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  </section>
 </Layout>
+
+<script>
+  import "../scripts/rows.ts";
+</script>

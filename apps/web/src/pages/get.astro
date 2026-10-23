@@ -7,17 +7,17 @@ const clientId = env.DISCORD_CLIENT_ID;
 const configured = clientId.length > 0;
 ---
 
-<Layout title="Get the tools">
+<Layout title="Get the tools" active="tools">
   <h1>Get the tools</h1>
   <p class="muted">Everything is optional. The website works on its own.</p>
 
   <section class="card">
     <h2>Discord app</h2>
     <p><strong>Add to my account</strong> lets you use <code>/avail</code>, <code>/play now</code> and <code>/delay</code> in any server or DM. No admin rights needed.</p>
-    <a class="button" href={configured ? userInstallUrl(clientId) : undefined} aria-disabled={!configured}>Add to my account</a>
+    <a class="button discord" href={configured ? userInstallUrl(clientId) : undefined} aria-disabled={!configured}>Add to my account</a>
 
     <p><strong>Add to my server</strong> posts your group's availability board in a channel. Needs Manage Server.</p>
-    <a class="button" href={configured ? serverInstallUrl(clientId) : undefined} aria-disabled={!configured}>Add to my server</a>
+    <a class="button discord" href={configured ? serverInstallUrl(clientId) : undefined} aria-disabled={!configured}>Add to my server</a>
 
     <p class="muted">
       The bot asks for: View Channels, Send Messages, Embed Links and Use Application Commands, so it can post and

@@ -8,6 +8,7 @@ import {
   gamingDay,
   isValidLocalDate,
   isValidWallTime,
+  isoWeekday,
   minutesIntoGamingDay,
   resolveEffective,
   visibleInGroup,
@@ -36,6 +37,27 @@ export type Source = Entry["source"];
 export function upcomingDays(tz: string, count = 7): LocalDate[] {
   const today = gamingDay(Date.now(), tz);
   return Array.from({ length: count }, (_, i) => addDays(today, i));
+}
+
+export type PlanningWeek = { key: "this" | "next"; monday: LocalDate; days: LocalDate[] };
+
+function mondayOf(day: LocalDate): LocalDate {
+  return addDays(day, 1 - isoWeekday(day));
+}
+
+/** The rest of this week (from today) and all of next week, Monday to Sunday. */
+export function planningWeeks(tz: string): PlanningWeek[] {
+  const today = gamingDay(Date.now(), tz);
+  const monday = mondayOf(today);
+  const nextMonday = addDays(monday, 7);
+  return [
+    { key: "this", monday, days: Array.from({ length: 7 }, (_, i) => addDays(monday, i)).filter((d) => d >= today) },
+    { key: "next", monday: nextMonday, days: Array.from({ length: 7 }, (_, i) => addDays(nextMonday, i)) },
+  ];
+}
+
+export function planningDays(tz: string): LocalDate[] {
+  return planningWeeks(tz).flatMap((w) => w.days);
 }
 
 export async function setAvailability(
@@ -164,13 +186,15 @@ export async function myDays(db: Db, userId: string, days: LocalDate[]): Promise
 }
 
 /**
- * Copies this week's explicit answers to the same weekdays next week, without touching days that
- * already have an explicit answer. Days limited to selected groups aren't copied, so a copy can
- * never be shared more widely than the original. Returns how many days were copied.
+ * Copies this week's explicit answers (Monday to Sunday, including days already past) to the same
+ * weekdays next week, without touching days that already have an explicit answer. Days limited to
+ * selected groups aren't copied, so a copy can never be shared more widely than the original.
+ * Returns how many days were copied.
  */
 export async function copyWeekForward(db: Db, user: SessionUser): Promise<number> {
   if (!user.timezone) throw new UserError("Pick your time zone first.");
-  const days = upcomingDays(user.timezone);
+  const monday = mondayOf(gamingDay(Date.now(), user.timezone));
+  const days = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
   const targets = days.map((d) => addDays(d, 7));
   const [current, next] = await Promise.all([myEntries(db, user.id, days), myEntries(db, user.id, targets)]);
   let copied = 0;
@@ -289,10 +313,15 @@ export type WeekView = {
 export type GroupWeek = WeekView & { membership: Membership };
 
 /** A group's week as the acting member is allowed to see it. Null if the actor isn't a member. */
-export async function groupWeek(db: Db, actor: SessionUser, groupId: string): Promise<GroupWeek | null> {
+export async function groupWeek(
+  db: Db,
+  actor: SessionUser,
+  groupId: string,
+  days?: LocalDate[],
+): Promise<GroupWeek | null> {
   const access = await getGroupAsMember(db, actor.id, groupId);
   if (!access) return null;
-  const view = await loadWeek(db, access.group, upcomingDays(actor.timezone ?? access.group.timezone));
+  const view = await loadWeek(db, access.group, days ?? upcomingDays(actor.timezone ?? access.group.timezone));
   return { ...view, membership: access.membership };
 }
 

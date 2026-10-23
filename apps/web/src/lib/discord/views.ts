@@ -1,5 +1,5 @@
 // Pure renderers for Discord messages. No database or network access, so they're easy to test.
-import { addMinutesInGamingDay, type LocalDate, type Status, type WallTime } from "@party/domain";
+import { addMinutesInGamingDay, isoWeekday, type LocalDate, type Status, type WallTime } from "@party/domain";
 import { DEFAULT_START, TIME_OPTIONS, dayLabel, timeIn } from "../format.ts";
 import { row, type ActionRow, type Button, type MessagePayload } from "./types.ts";
 
@@ -53,7 +53,10 @@ export type PlannerInput = {
 export function plannerMessage(input: PlannerInput): MessagePayload {
   const { days, entries, selectedDay } = input;
   const current = entries.get(selectedDay);
-  const lines = days.map((d) => `\`${dayLabel(d).padEnd(10)}\` ${answerText(entries.get(d))}`);
+  const lines = days.flatMap((d, i) => [
+    ...(i === 0 ? ["__This week__"] : isoWeekday(d) === 1 ? ["__Next week__"] : []),
+    `\`${dayLabel(d).padEnd(10)}\` ${answerText(entries.get(d))}`,
+  ]);
 
   const statusButton = (status: Status, label: string, activeStyle: 1 | 3 | 4): Button => ({
     type: 2,
@@ -90,7 +93,7 @@ export function plannerMessage(input: PlannerInput): MessagePayload {
 
   return {
     content: [
-      `**Your week** · times in ${input.tz.replaceAll("_", " ")}`,
+      `**Your plans** · times in ${input.tz.replaceAll("_", " ")}`,
       ...lines,
       "",
       input.notice ?? `Editing **${dayLabel(selectedDay)}**: pick a start time, then Yes, Maybe or No.`,

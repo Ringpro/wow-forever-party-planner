@@ -1,0 +1,190 @@
+---
+// One editable day (or weekday default): Yes / Maybe / No plus start and end time.
+// Works as a plain form; scripts/rows.ts upgrades it to save without a page reload.
+import { DEFAULT_START, TIME_OPTIONS } from "../lib/format.ts";
+
+interface Props {
+  id: string;
+  /** Short label on top, e.g. "Wed" or "Monday". */
+  title: string;
+  /** Large label below, e.g. "28". Optional. */
+  subtitle?: string;
+  badge?: string;
+  hidden: Record<string, string | number>;
+  status: "yes" | "maybe" | "no" | "unknown";
+  kind: "explicit" | "default" | "unknown";
+  start: string | null;
+  end: string | null;
+  canClear: boolean;
+  note?: string;
+}
+
+const { id, title, subtitle, badge, hidden, status, kind, start, end, canClear, note } = Astro.props;
+const pressed = (s: string) => (status === s ? "true" : "false");
+---
+
+<form method="post" class="day-row" id={id} data-row data-status={status} data-kind={kind}>
+  {Object.entries(hidden).map(([name, value]) => <input type="hidden" name={name} value={value} />)}
+  <div class="day-date">
+    <span class="dow">{title}</span>
+    {subtitle && <span class="dom">{subtitle}</span>}
+    {badge && <span class="badge">{badge}</span>}
+  </div>
+  <div class="day-main">
+    <div class="seg" role="group" aria-label={`Availability ${title} ${subtitle ?? ""}`}>
+      <button class="seg-btn yes" name="status" value="yes" aria-pressed={pressed("yes")}>Yes</button>
+      <button class="seg-btn maybe" name="status" value="maybe" aria-pressed={pressed("maybe")}>Maybe</button>
+      <button class="seg-btn no" name="status" value="no" aria-pressed={pressed("no")}>No</button>
+    </div>
+    <div class="day-times">
+      <select name="start" aria-label="Start time">
+        {TIME_OPTIONS.map((t) => <option selected={t === (start ?? DEFAULT_START)}>{t}</option>)}
+      </select>
+      <span class="muted" aria-hidden="true">–</span>
+      <select name="end" aria-label="End time (optional)">
+        <option value="">late</option>
+        {TIME_OPTIONS.map((t) => <option selected={t === end}>{t}</option>)}
+      </select>
+      {canClear && (
+        <button class="clear" name="status" value="clear" title="Clear this day" aria-label="Clear this day">
+          ×
+        </button>
+      )}
+    </div>
+    {note && <p class="day-note">{note}</p>}
+  </div>
+  <span class="saved" aria-hidden="true">Saved</span>
+</form>
+
+<style is:global>
+  .day-list {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .day-row {
+    position: relative;
+    display: grid;
+    grid-template-columns: 52px 1fr;
+    gap: 12px;
+    padding: 14px 16px;
+    margin: 0;
+    border-top: 1px solid var(--border);
+    transition: background 0.2s;
+  }
+  .day-row:first-child {
+    border-top: 0;
+  }
+  .day-row.saving {
+    opacity: 0.6;
+  }
+  .day-main {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    min-width: 0;
+  }
+  .seg {
+    display: inline-flex;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 3px;
+    gap: 3px;
+  }
+  .seg-btn {
+    min-height: 38px;
+    min-width: 62px;
+    padding: 6px 10px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--muted);
+    font-weight: 650;
+  }
+  .seg-btn:hover {
+    color: var(--text);
+    background: var(--surface-3);
+  }
+  .seg-btn.yes[aria-pressed="true"] {
+    background: var(--yes);
+    color: #fff;
+  }
+  .seg-btn.maybe[aria-pressed="true"] {
+    background: var(--maybe);
+    color: #1d1605;
+  }
+  .seg-btn.no[aria-pressed="true"] {
+    background: var(--no);
+    color: #fff;
+  }
+  /* A weekly default: shown, but softer than an answer you gave for this day. */
+  [data-kind="default"] .seg-btn[aria-pressed="true"] {
+    background: transparent;
+    outline: 1.5px dashed currentColor;
+    outline-offset: -2px;
+  }
+  [data-kind="default"] .seg-btn.yes[aria-pressed="true"] {
+    color: var(--yes);
+  }
+  [data-kind="default"] .seg-btn.maybe[aria-pressed="true"] {
+    color: var(--maybe);
+  }
+  [data-kind="default"] .seg-btn.no[aria-pressed="true"] {
+    color: var(--no);
+  }
+  .day-times {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .day-times select {
+    min-height: 40px;
+    padding: 6px 8px;
+    font-variant-numeric: tabular-nums;
+  }
+  [data-status="no"] .day-times select,
+  [data-status="unknown"] .day-times select {
+    color: var(--muted);
+  }
+  [data-status="no"] .day-times select {
+    opacity: 0.45;
+  }
+  .clear {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font-size: 1.3rem;
+    line-height: 1;
+  }
+  .clear:hover {
+    background: var(--surface-3);
+    color: var(--text);
+  }
+  .day-note {
+    flex-basis: 100%;
+    margin: 0;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+  .saved {
+    position: absolute;
+    top: 10px;
+    right: 14px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--yes);
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+  }
+  .day-row.just-saved .saved {
+    opacity: 1;
+  }
+</style>
