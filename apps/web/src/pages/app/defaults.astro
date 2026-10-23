@@ -1,0 +1,94 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import { DEFAULT_START, STATUS_ICON, STATUS_LABEL, TIME_OPTIONS } from "../../lib/format.ts";
+import { clearWeeklyDefault, getWeeklyDefaults, setWeeklyDefault } from "../../lib/server/availability.ts";
+import { refreshBoardsLater } from "../../lib/server/background.ts";
+import { getDb } from "../../lib/server/db.ts";
+import { UserError } from "../../lib/server/users.ts";
+
+const user = Astro.locals.user!;
+const db = getDb();
+let error: string | null = null;
+
+const WEEKDAYS = [
+  [1, "Monday"],
+  [2, "Tuesday"],
+  [3, "Wednesday"],
+  [4, "Thursday"],
+  [5, "Friday"],
+  [6, "Saturday"],
+  [7, "Sunday"],
+] as const;
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  const weekday = Number(form.get("weekday"));
+  const status = String(form.get("status") ?? "");
+  try {
+    if (status === "clear") {
+      await clearWeeklyDefault(db, user.id, weekday);
+    } else {
+      await setWeeklyDefault(db, user, weekday, {
+        status,
+        startLocal: String(form.get("start") ?? "") || null,
+        endLocal: String(form.get("end") ?? "") || null,
+      });
+    }
+    refreshBoardsLater(Astro.locals, { userId: user.id });
+    return Astro.redirect(`/app/defaults#w-${weekday}`);
+  } catch (e) {
+    if (!(e instanceof UserError)) throw e;
+    error = e.message;
+  }
+}
+
+const defaults = await getWeeklyDefaults(db, user.id);
+---
+
+<Layout title="Weekly defaults">
+  <h1>Weekly defaults</h1>
+  <p class="muted">
+    Your usual week. Defaults fill in any day you haven't answered, so you only need to change the exceptions.{" "}
+    <a href="/app">Back to my week</a>
+  </p>
+  {error && <p class="error">{error}</p>}
+
+  {WEEKDAYS.map(([weekday, name]) => {
+    const d = defaults[weekday];
+    const status = d?.status ?? "unknown";
+    return (
+      <form method="post" class="card day" id={`w-${weekday}`}>
+        <input type="hidden" name="weekday" value={weekday} />
+        <div class="day-head">
+          <strong>{name}</strong>
+          <span class={`pill ${status}`}>
+            {d ? `${STATUS_ICON[d.status]} ${STATUS_LABEL[d.status]}` : "No default"}
+            {d?.startLocal && ` from ${d.startLocal}`}
+            {d?.endLocal && ` until ${d.endLocal}`}
+          </span>
+        </div>
+        <div class="times">
+          <label>
+            From
+            <select name="start">
+              {TIME_OPTIONS.map((t) => <option selected={t === (d?.startLocal ?? DEFAULT_START)}>{t}</option>)}
+            </select>
+          </label>
+          <label>
+            Until
+            <select name="end">
+              <option value="">—</option>
+              {TIME_OPTIONS.map((t) => <option selected={t === d?.endLocal}>{t}</option>)}
+            </select>
+          </label>
+        </div>
+        <div class="status-buttons">
+          <button class="status yes" name="status" value="yes" aria-pressed={status === "yes" ? "true" : "false"}>✓ Yes</button>
+          <button class="status maybe" name="status" value="maybe" aria-pressed={status === "maybe" ? "true" : "false"}>~ Maybe</button>
+          <button class="status no" name="status" value="no" aria-pressed={status === "no" ? "true" : "false"}>✗ No</button>
+          {d && <button class="status clear" name="status" value="clear">Clear</button>}
+        </div>
+      </form>
+    );
+  })}
+</Layout>

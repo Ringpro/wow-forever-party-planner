@@ -76,7 +76,9 @@ const inviteUrl = isAdmin ? `${Astro.url.origin}/join/${await getInviteToken(db,
       <ul class="members">
         {members.map((m) => (
           <li class={m.status}>
-            <span class={`pill ${m.status}`}>{STATUS_ICON[m.status]} {STATUS_LABEL[m.status]}</span>
+            <span class={`pill ${m.status}${m.kind === "default" ? " default" : ""}`} title={m.kind === "default" ? "Weekly default" : undefined}>
+              {STATUS_ICON[m.status]} {STATUS_LABEL[m.status]}
+            </span>
             <span>{m.displayName}</span>
             {m.startsAt !== null && (
               <span class="muted">

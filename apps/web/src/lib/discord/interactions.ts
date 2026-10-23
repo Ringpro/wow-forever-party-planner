@@ -9,6 +9,7 @@ import {
   clearFreeNow,
   groupWeek,
   moveStart,
+  myDays,
   myEntries,
   setAvailability,
   setFreeNow,
@@ -108,7 +109,9 @@ async function planner(
   notice?: string,
 ): Promise<MessagePayload> {
   const days = upcomingDays(actor.timezone);
-  const entries = await myEntries(db, actor.id, days);
+  const entries = new Map(
+    [...(await myDays(db, actor.id, days))].flatMap(([d, a]) => (a.kind === "unknown" ? [] : [[d, a] as const])),
+  );
   const day = selectedDay && days.includes(selectedDay) ? selectedDay : days[0]!;
   return plannerMessage({
     tz: actor.timezone,

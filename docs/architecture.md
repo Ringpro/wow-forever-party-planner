@@ -235,7 +235,7 @@ Implemented in [packages/domain/src/time.ts](../packages/domain/src/time.ts) usi
 Kept fast on purpose: GitHub Actions runs `pnpm typecheck` and `pnpm test` on pushes and PRs (about a minute). No deploy pipeline yet; deploys are manual.
 
 - **Now:** domain unit tests (time/DST, effective availability, sharing, best start) and Discord tests (signature check, PING, install links).
-- **Before the pilot:** D1 integration tests including the leak tests in §5.2 (Cloudflare's Vitest integration runs tests inside `workerd` with a real local D1).
+- **Now:** D1 integration tests in `apps/web/test`, including the leak tests in §5.2 and weekly defaults. They run against a real local D1 from wrangler's `getPlatformProxy` (not persisted to disk).
 - **Later:** a deploy job on `main`, a staging environment, Playwright smoke tests.
 
 ## 10. Integration assumptions to verify

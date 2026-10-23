@@ -3,7 +3,7 @@ import { addMinutesInGamingDay, type LocalDate, type Status, type WallTime } fro
 import { DEFAULT_START, TIME_OPTIONS, dayLabel, timeIn } from "../format.ts";
 import { row, type ActionRow, type Button, type MessagePayload } from "./types.ts";
 
-type Answer = { status: Status; startLocal: string | null; endLocal: string | null };
+type Answer = { status: Status; startLocal: string | null; endLocal: string | null; kind?: "explicit" | "default" };
 
 type DayView = {
   day: LocalDate;
@@ -26,9 +26,9 @@ export function fromHhmm(value: string | undefined): WallTime | null {
 
 function answerText(a: Answer | undefined): string {
   if (!a) return "not set";
-  if (a.status === "no") return `${ICON.no} No`;
   const label = a.status === "yes" ? "Yes" : "Maybe";
-  return `${ICON[a.status]} ${label} from ${a.startLocal}${a.endLocal ? `–${a.endLocal}` : ""}`;
+  const text = a.status === "no" ? `${ICON.no} No` : `${ICON[a.status]} ${label} from ${a.startLocal}${a.endLocal ? `–${a.endLocal}` : ""}`;
+  return a.kind === "default" ? `${text} (default)` : text;
 }
 
 function sharedLine(sharedWith: string[]): string {
@@ -57,7 +57,7 @@ export function plannerMessage(input: PlannerInput): MessagePayload {
 
   const statusButton = (status: Status, label: string, activeStyle: 1 | 3 | 4): Button => ({
     type: 2,
-    style: current?.status === status ? activeStyle : 2,
+    style: current?.status === status && current.kind !== "default" ? activeStyle : 2,
     label,
     custom_id: `pl:set:${selectedDay}:${status}:${hhmm(input.pendingStart)}`,
   });
@@ -66,7 +66,7 @@ export function plannerMessage(input: PlannerInput): MessagePayload {
     statusButton("maybe", `${ICON.maybe} Maybe`, 1),
     statusButton("no", `${ICON.no} No`, 4),
   ];
-  if (current) buttons.push({ type: 2, style: 2, label: "Clear", custom_id: `pl:clear:${selectedDay}` });
+  if (current && current.kind !== "default") buttons.push({ type: 2, style: 2, label: "Clear", custom_id: `pl:clear:${selectedDay}` });
 
   const components: ActionRow[] = [
     row({

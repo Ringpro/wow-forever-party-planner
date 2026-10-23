@@ -9,9 +9,13 @@ import {
   isValidLocalDate,
   isValidWallTime,
   minutesIntoGamingDay,
+  resolveEffective,
   visibleInGroup,
   type BestStart,
+  type EffectiveAvailability,
+  type IsoWeekday,
   type LocalDate,
+  type WeeklyDefaults,
   type MemberInterval,
   type Status,
   type WallTime,
@@ -93,11 +97,111 @@ export async function myEntries(db: Db, userId: string, days: LocalDate[]): Prom
   return new Map(rows.map((r) => [r.localDate, r]));
 }
 
-export type ShiftResult = { day: LocalDate; from: WallTime; to: WallTime; status: "yes" | "maybe"; ignored: boolean };
+// ── Weekly defaults (PRD M4) ─────────────────────────────────────────────────────────────
+
+const WEEKDAYS: readonly IsoWeekday[] = [1, 2, 3, 4, 5, 6, 7];
+
+async function defaultsFor(db: Db, userIds: string[]): Promise<Map<string, WeeklyDefaults>> {
+  const byUser = new Map<string, WeeklyDefaults>();
+  if (userIds.length === 0) return byUser;
+  const rows = await db.select().from(schema.weeklyDefaults).where(inArray(schema.weeklyDefaults.userId, userIds));
+  for (const r of rows) {
+    const defaults = byUser.get(r.userId) ?? {};
+    defaults[r.weekday as IsoWeekday] = { status: r.status, startLocal: r.startLocal, endLocal: r.endLocal, tz: r.tz };
+    byUser.set(r.userId, defaults);
+  }
+  return byUser;
+}
+
+export async function getWeeklyDefaults(db: Db, userId: string): Promise<WeeklyDefaults> {
+  return (await defaultsFor(db, [userId])).get(userId) ?? {};
+}
+
+export async function setWeeklyDefault(
+  db: Db,
+  user: SessionUser,
+  weekday: number,
+  input: { status: string; startLocal: string | null; endLocal: string | null },
+): Promise<void> {
+  if (!user.timezone) throw new UserError("Pick your time zone first.");
+  const day = WEEKDAYS.find((w) => w === weekday);
+  if (!day) throw new UserError("Unknown weekday.");
+  const status = STATUSES.find((s) => s === input.status);
+  if (!status) throw new UserError("Pick Yes, Maybe or No.");
+  let startLocal: WallTime | null = null;
+  let endLocal: WallTime | null = null;
+  if (status !== "no") {
+    if (!input.startLocal || !isValidWallTime(input.startLocal)) throw new UserError("Pick a start time.");
+    if (input.endLocal && !isValidWallTime(input.endLocal)) throw new UserError("That end time isn't valid.");
+    startLocal = input.startLocal;
+    endLocal = input.endLocal || null;
+  }
+  const values = { status, startLocal, endLocal, tz: user.timezone, updatedAt: Date.now() };
+  await db
+    .insert(schema.weeklyDefaults)
+    .values({ userId: user.id, weekday: day, ...values })
+    .onConflictDoUpdate({ target: [schema.weeklyDefaults.userId, schema.weeklyDefaults.weekday], set: values });
+}
+
+export async function clearWeeklyDefault(db: Db, userId: string, weekday: number): Promise<void> {
+  await db
+    .delete(schema.weeklyDefaults)
+    .where(and(eq(schema.weeklyDefaults.userId, userId), eq(schema.weeklyDefaults.weekday, weekday)));
+}
+
+export type MyDay = EffectiveAvailability & { entry?: Entry };
+
+/** The user's own days: explicit answer, else weekly default, else unknown. */
+export async function myDays(db: Db, userId: string, days: LocalDate[]): Promise<Map<LocalDate, MyDay>> {
+  const [entries, defaults] = await Promise.all([myEntries(db, userId, days), getWeeklyDefaults(db, userId)]);
+  return new Map(
+    days.map((day) => {
+      const entry = entries.get(day);
+      const effective = resolveEffective(day, entry && { ...entry }, defaults);
+      return [day, entry ? { ...effective, entry } : effective];
+    }),
+  );
+}
 
 /**
- * Moves the start of an existing Yes/Maybe on `day` to `to`, keeping the status.
- * Drops the end time if the new start would be at or after it.
+ * Copies this week's explicit answers to the same weekdays next week, without touching days that
+ * already have an explicit answer. Days limited to selected groups aren't copied, so a copy can
+ * never be shared more widely than the original. Returns how many days were copied.
+ */
+export async function copyWeekForward(db: Db, user: SessionUser): Promise<number> {
+  if (!user.timezone) throw new UserError("Pick your time zone first.");
+  const days = upcomingDays(user.timezone);
+  const targets = days.map((d) => addDays(d, 7));
+  const [current, next] = await Promise.all([myEntries(db, user.id, days), myEntries(db, user.id, targets)]);
+  let copied = 0;
+  for (const day of days) {
+    const entry = current.get(day);
+    const target = addDays(day, 7);
+    if (!entry || entry.shareScope !== "all_shared_groups" || next.has(target)) continue;
+    await setAvailability(
+      db,
+      user,
+      { day: target, status: entry.status, startLocal: entry.startLocal, endLocal: entry.endLocal },
+      entry.source,
+    );
+    copied++;
+  }
+  return copied;
+}
+
+export type ShiftResult = { day: LocalDate; from: WallTime; to: WallTime; status: "yes" | "maybe"; ignored: boolean };
+
+async function playingOn(db: Db, user: SessionUser, day: LocalDate, message: string) {
+  const current = (await myDays(db, user.id, [day])).get(day);
+  if (!current || current.kind === "unknown" || current.status === "no" || !current.startLocal) {
+    throw new UserError(message);
+  }
+  return { ...current, status: current.status, startLocal: current.startLocal };
+}
+
+/**
+ * Moves the start of a Yes/Maybe on `day` (explicit or from the weekly default) to `to`, keeping
+ * the status. Drops the end time if the new start would be at or after it.
  */
 export async function moveStart(
   db: Db,
@@ -107,13 +211,11 @@ export async function moveStart(
   source: Source,
   extra: { lastRelativeShiftAt?: number } = {},
 ): Promise<ShiftResult> {
-  const entry = (await myEntries(db, user.id, [day])).get(day);
-  if (!entry || entry.status === "no" || !entry.startLocal) {
-    throw new UserError("You haven't said you're playing that day yet. Use Plan my week first.");
-  }
-  const endLocal = entry.endLocal && minutesIntoGamingDay(entry.endLocal) > minutesIntoGamingDay(to) ? entry.endLocal : null;
-  await setAvailability(db, user, { day, status: entry.status, startLocal: to, endLocal }, source, extra);
-  return { day, from: entry.startLocal, to, status: entry.status, ignored: false };
+  const current = await playingOn(db, user, day, "You haven't said you're playing that day yet. Use Plan my week first.");
+  const endLocal =
+    current.endLocal && minutesIntoGamingDay(current.endLocal) > minutesIntoGamingDay(to) ? current.endLocal : null;
+  await setAvailability(db, user, { day, status: current.status, startLocal: to, endLocal }, source, extra);
+  return { day, from: current.startLocal, to, status: current.status, ignored: false };
 }
 
 /**
@@ -124,14 +226,12 @@ export async function shiftToday(db: Db, user: SessionUser, minutes: number, sou
   if (!user.timezone) throw new UserError("Pick your time zone first.");
   const now = Date.now();
   const day = gamingDay(now, user.timezone);
-  const entry = (await myEntries(db, user.id, [day])).get(day);
-  if (!entry || entry.status === "no" || !entry.startLocal) {
-    throw new UserError("You haven't said you're playing today yet. Use Plan my week first.");
+  const current = await playingOn(db, user, day, "You haven't said you're playing today yet. Use Plan my week first.");
+  const lastShift = current.entry?.lastRelativeShiftAt;
+  if (lastShift && now - lastShift < DOUBLE_TAP_MS) {
+    return { day, from: current.startLocal, to: current.startLocal, status: current.status, ignored: true };
   }
-  if (entry.lastRelativeShiftAt && now - entry.lastRelativeShiftAt < DOUBLE_TAP_MS) {
-    return { day, from: entry.startLocal, to: entry.startLocal, status: entry.status, ignored: true };
-  }
-  const target = addMinutesInGamingDay(entry.startLocal, minutes);
+  const target = addMinutesInGamingDay(current.startLocal, minutes);
   if (!target) throw new UserError("That's past the end of the evening.");
   return moveStart(db, user, day, target, source, { lastRelativeShiftAt: now });
 }
@@ -163,6 +263,8 @@ export type GroupMemberDay = {
   displayName: string;
   /** "unknown" covers both unanswered and hidden, on purpose (architecture §4.2). */
   status: Status | "unknown";
+  /** Whether the answer came from the member or from their weekly default. */
+  kind: "explicit" | "default" | null;
   startsAt: number | null;
   endsAt: number | null;
   updatedAt: number | null;
@@ -211,6 +313,7 @@ async function loadWeek(db: Db, group: Group, days: LocalDate[]): Promise<WeekVi
       displayName: schema.users.displayName,
       role: schema.groupMemberships.role,
       shareAvailability: schema.groupMemberships.shareAvailability,
+      defaultSessionMinutes: schema.users.defaultSessionMinutes,
     })
     .from(schema.groupMemberships)
     .innerJoin(schema.users, eq(schema.users.id, schema.groupMemberships.userId))
@@ -242,6 +345,7 @@ async function loadWeek(db: Db, group: Group, days: LocalDate[]): Promise<WeekVi
   }
 
   const byKey = new Map(entries.map((e) => [`${e.userId}|${e.localDate}`, e]));
+  const defaults = await defaultsFor(db, sharingIds);
 
   const freeRows =
     sharingIds.length === 0
@@ -261,26 +365,43 @@ async function loadWeek(db: Db, group: Group, days: LocalDate[]): Promise<WeekVi
     freeNow,
     days: days.map((day) => {
       const rows: GroupMemberDay[] = members.map((m) => {
+        const hidden: GroupMemberDay = {
+          userId: m.userId,
+          displayName: m.displayName,
+          status: "unknown",
+          kind: null,
+          startsAt: null,
+          endsAt: null,
+          updatedAt: null,
+        };
+        const membership = { groupId, shareAvailability: m.shareAvailability };
         const entry = byKey.get(`${m.userId}|${day}`);
-        const visible =
-          entry &&
-          visibleInGroup(
-            groupId,
-            { groupId, shareAvailability: m.shareAvailability },
+        if (entry) {
+          // An explicit answer always wins over the default, even when it's hidden from this group.
+          const sharing =
             entry.shareScope === "selected"
-              ? { shareScope: "selected", groupIds: selectedGroups.get(entry.id) ?? [] }
-              : { shareScope: "all_shared_groups" },
-          );
-        return visible
-          ? {
-              userId: m.userId,
-              displayName: m.displayName,
-              status: entry.status,
-              startsAt: entry.startsAt,
-              endsAt: entry.endsAt,
-              updatedAt: entry.updatedAt,
-            }
-          : { userId: m.userId, displayName: m.displayName, status: "unknown", startsAt: null, endsAt: null, updatedAt: null };
+              ? ({ shareScope: "selected", groupIds: selectedGroups.get(entry.id) ?? [] } as const)
+              : ({ shareScope: "all_shared_groups" } as const);
+          if (!visibleInGroup(groupId, membership, sharing)) return hidden;
+          return {
+            ...hidden,
+            status: entry.status,
+            kind: "explicit",
+            startsAt: entry.startsAt,
+            endsAt: entry.endsAt,
+            updatedAt: entry.updatedAt,
+          };
+        }
+        const fallback = resolveEffective(day, undefined, defaults.get(m.userId) ?? {});
+        if (fallback.kind === "unknown" || !visibleInGroup(groupId, membership, null)) return hidden;
+        const interval = answerInterval(day, fallback, m.defaultSessionMinutes);
+        return {
+          ...hidden,
+          status: fallback.status,
+          kind: "default",
+          startsAt: interval?.start ?? null,
+          endsAt: interval?.end ?? null,
+        };
       });
 
       const counts = { yes: 0, maybe: 0, no: 0, unknown: 0 };

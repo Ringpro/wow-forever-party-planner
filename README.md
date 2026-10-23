@@ -11,6 +11,7 @@ A small, free scheduling tool for groups of World of Warcraft players with littl
 - Log in with Discord
 - Create groups, invite friends with a link, join several groups
 - Mark each of the next 7 evenings as Yes / Maybe / No with a start time (and optional end)
+- Weekly defaults for your usual week, and one tap to copy this week to next week
 - See your group's week: who's in, and the earliest time enough people overlap
 - Choose per group whether it sees your availability; hidden and unanswered look the same to others
 - Correct across time zones, daylight saving changes and sessions past midnight
@@ -18,7 +19,7 @@ A small, free scheduling tool for groups of World of Warcraft players with littl
 
 ## Planned
 
-Weekly defaults, reminders, characters and levels, and later a WoW addon. See [docs/prd.md](docs/prd.md) for the full plan.
+Reminders, choosing which groups see a single day, characters and levels, and later a WoW addon. See [docs/prd.md](docs/prd.md) for the full plan.
 
 ## Tech
 
