@@ -14,10 +14,11 @@ A small, free scheduling tool for groups of World of Warcraft players with littl
 - See your group's week: who's in, and the earliest time enough people overlap
 - Choose per group whether it sees your availability; hidden and unanswered look the same to others
 - Correct across time zones, daylight saving changes and sessions past midnight
+- Discord: `/avail` week planner, `/play now`, `/delay`, `/who`, and `/board setup` for a live 7-day board in a channel that updates when anyone changes their plans
 
 ## Planned
 
-Discord commands and a live availability board, weekly defaults, reminders, characters and levels, and later a WoW addon. See [docs/prd.md](docs/prd.md) for the full plan.
+Weekly defaults, reminders, characters and levels, and later a WoW addon. See [docs/prd.md](docs/prd.md) for the full plan.
 
 ## Tech
 
@@ -49,6 +50,16 @@ pnpm dev
 Then open <http://localhost:4321/auth/dev?name=Alice> to log in as a fake user (this route only exists in `pnpm dev`). Use a second browser profile with `?name=Bob` to try a group with two people.
 
 To test real Discord login, create an app in the [Discord developer portal](https://discord.com/developers/applications), add `http://localhost:4321/auth/discord/callback` as a redirect, set `DISCORD_CLIENT_ID` and `DISCORD_PUBLIC_KEY` in `apps/web/wrangler.jsonc`, and copy `apps/web/.dev.vars.example` to `apps/web/.dev.vars` with your secrets.
+
+To try the Discord commands locally, Discord has to reach your machine. Install [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/), start a quick tunnel, and point your Discord app at it (the tunnel URL changes every time):
+
+```bash
+cloudflared tunnel --url http://localhost:4321
+```
+
+```bash
+pnpm discord:register --endpoint https://<random-name>.trycloudflare.com
+```
 
 Checks (the same ones CI runs):
 

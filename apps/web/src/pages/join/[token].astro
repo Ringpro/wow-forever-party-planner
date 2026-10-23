@@ -1,5 +1,6 @@
 ---
 import Layout from "../../layouts/Layout.astro";
+import { refreshBoardsLater } from "../../lib/server/background.ts";
 import { getDb } from "../../lib/server/db.ts";
 import { findInvite, joinGroup } from "../../lib/server/groups.ts";
 import { UserError } from "../../lib/server/users.ts";
@@ -13,6 +14,7 @@ if (Astro.request.method === "POST") {
   const form = await Astro.request.formData();
   try {
     const groupId = await joinGroup(db, user.id, token, form.get("share") === "on");
+    refreshBoardsLater(Astro.locals, { groupIds: [groupId] });
     return Astro.redirect(`/groups/${groupId}`);
   } catch (e) {
     if (!(e instanceof UserError)) throw e;

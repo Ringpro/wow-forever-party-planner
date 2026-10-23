@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   addDays,
+  addMinutesInGamingDay,
+  minutesIntoGamingDay,
   calendarDateFor,
   gamingDay,
   isValidLocalDate,
@@ -50,6 +52,20 @@ describe("gaming day", () => {
   it("maps early-morning wall times to the next calendar date", () => {
     expect(calendarDateFor("2026-10-23", "00:30")).toBe("2026-10-24");
     expect(calendarDateFor("2026-10-23", "21:00")).toBe("2026-10-23");
+  });
+});
+
+describe("gaming-day minutes", () => {
+  it("orders after-midnight times after the evening", () => {
+    expect(minutesIntoGamingDay("23:30")).toBeLessThan(minutesIntoGamingDay("00:30"));
+    expect(minutesIntoGamingDay("05:00")).toBe(0);
+  });
+
+  it("adds minutes across midnight but not past the rollover", () => {
+    expect(addMinutesInGamingDay("20:30", 30)).toBe("21:00");
+    expect(addMinutesInGamingDay("23:45", 30)).toBe("00:15");
+    expect(addMinutesInGamingDay("04:45", 30)).toBeNull();
+    expect(addMinutesInGamingDay("05:15", -30)).toBeNull();
   });
 });
 

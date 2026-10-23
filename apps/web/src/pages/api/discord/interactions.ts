@@ -1,9 +1,11 @@
 import type { APIRoute } from "astro";
 import { env } from "cloudflare:workers";
-import { handleInteraction, type Interaction } from "../../../lib/discord/interactions.ts";
+import { handleInteraction } from "../../../lib/discord/interactions.ts";
+import type { Interaction } from "../../../lib/discord/types.ts";
 import { verifyDiscordRequest } from "../../../lib/discord/verify.ts";
+import { getDb } from "../../../lib/server/db.ts";
 
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request, locals }) => {
   const body = await request.text();
   const valid = await verifyDiscordRequest(
     body,
@@ -13,7 +15,14 @@ export const POST: APIRoute = async ({ request }) => {
   );
   if (!valid) return new Response("invalid request signature", { status: 401 });
 
-  const response = handleInteraction(JSON.parse(body) as Interaction);
-  if (!response) return new Response("unknown interaction type", { status: 400 });
+  const interaction = JSON.parse(body) as Interaction;
+  const response = await handleInteraction(interaction, {
+    db: getDb(),
+    waitUntil: (promise) =>
+      locals.cfContext.waitUntil(
+        promise.catch((e) => console.log(JSON.stringify({ event: "background_failed", error: String(e) }))),
+      ),
+  });
+  if (!response) return new Response("unsupported interaction", { status: 400 });
   return Response.json(response);
 };

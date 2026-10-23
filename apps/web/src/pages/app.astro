@@ -2,6 +2,7 @@
 import Layout from "../layouts/Layout.astro";
 import { DEFAULT_START, STATUS_ICON, STATUS_LABEL, TIME_OPTIONS, dayLabel } from "../lib/format.ts";
 import { clearAvailability, myEntries, setAvailability, upcomingDays } from "../lib/server/availability.ts";
+import { refreshBoardsLater } from "../lib/server/background.ts";
 import { getDb } from "../lib/server/db.ts";
 import { listMyGroups } from "../lib/server/groups.ts";
 import { UserError } from "../lib/server/users.ts";
@@ -24,8 +25,9 @@ if (Astro.request.method === "POST") {
         status,
         startLocal: String(form.get("start") ?? "") || null,
         endLocal: String(form.get("end") ?? "") || null,
-      });
+      }, "web");
     }
+    refreshBoardsLater(Astro.locals, { userId: user.id });
     return Astro.redirect(`/app#d-${day}`);
   } catch (e) {
     if (!(e instanceof UserError)) throw e;

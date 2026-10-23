@@ -2,6 +2,7 @@
 import Layout from "../../layouts/Layout.astro";
 import { STATUS_ICON, STATUS_LABEL, dayLabel, timeIn } from "../../lib/format.ts";
 import { groupWeek } from "../../lib/server/availability.ts";
+import { refreshBoardsLater } from "../../lib/server/background.ts";
 import { getDb } from "../../lib/server/db.ts";
 import { getInviteToken, leaveGroup, makeAdmin, resetInvite, setSharing } from "../../lib/server/groups.ts";
 import { UserError } from "../../lib/server/users.ts";
@@ -21,8 +22,10 @@ if (Astro.request.method === "POST") {
     else if (action === "make_admin") await makeAdmin(db, user.id, groupId, String(form.get("memberId") ?? ""));
     else if (action === "leave") {
       await leaveGroup(db, user.id, groupId);
+      refreshBoardsLater(Astro.locals, { groupIds: [groupId] });
       return Astro.redirect("/app");
     }
+    refreshBoardsLater(Astro.locals, { groupIds: [groupId] });
     return Astro.redirect(`/groups/${groupId}`);
   } catch (e) {
     if (!(e instanceof UserError)) throw e;
@@ -46,6 +49,13 @@ const inviteUrl = isAdmin ? `${Astro.url.origin}/join/${await getInviteToken(db,
   {error && <p class="error">{error}</p>}
   {!membership.shareAvailability && (
     <p class="notice">You're not sharing your availability with this group, so you show as "?" here.</p>
+  )}
+
+  {week.freeNow.length > 0 && (
+    <p class="card">
+      🟢 <strong>Free now:</strong>
+      {week.freeNow.map((f) => `${f.displayName} (until ${timeIn(f.until, tz)})`).join(", ")}
+    </p>
   )}
 
   {week.days.map(({ day, members, counts, best }) => (

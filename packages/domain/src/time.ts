@@ -106,6 +106,21 @@ export function calendarDateFor(day: LocalDate, time: WallTime): LocalDate {
   return time < GAMING_DAY_ROLLOVER ? addDays(day, 1) : day;
 }
 
+const wallMinutes = (t: WallTime) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+
+/** Minutes since the gaming-day rollover, so 00:30 sorts after 23:30. */
+export function minutesIntoGamingDay(time: WallTime): number {
+  return (wallMinutes(time) - wallMinutes(GAMING_DAY_ROLLOVER) + 1440) % 1440;
+}
+
+/** Adds minutes to a wall time, or null if the result would leave the gaming day. */
+export function addMinutesInGamingDay(time: WallTime, minutes: number): WallTime | null {
+  const target = minutesIntoGamingDay(time) + minutes;
+  if (target < 0 || target >= 1440) return null;
+  const m = (target + wallMinutes(GAMING_DAY_ROLLOVER)) % 1440;
+  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+}
+
 export function addDays(date: LocalDate, days: number): LocalDate {
   return new Date(wallClockMs(date, "00:00") + days * DAY).toISOString().slice(0, 10);
 }

@@ -10,7 +10,8 @@
     "typecheck": "wrangler types --strict-vars=false && astro check",
     "test": "vitest run",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
-    "db:migrate:remote": "wrangler d1 migrations apply DB --remote"
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "discord:register": "node scripts/discord-register.ts"
   },
   "dependencies": {
     "@astrojs/cloudflare": "^14.4.2",
