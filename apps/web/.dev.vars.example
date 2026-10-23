@@ -1,0 +1,4 @@
+# Copy to .dev.vars for local development. Values come from the Discord developer portal (dev app).
+DISCORD_PUBLIC_KEY=
+DISCORD_BOT_TOKEN=
+DISCORD_CLIENT_SECRET=

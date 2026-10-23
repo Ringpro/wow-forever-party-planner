@@ -1,0 +1,28 @@
+{
+  "name": "web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler types --strict-vars=false && astro dev",
+    "build": "wrangler types --strict-vars=false && astro build",
+    "preview": "astro preview",
+    "deploy": "pnpm build && wrangler deploy",
+    "typecheck": "wrangler types --strict-vars=false && astro check",
+    "test": "vitest run",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote"
+  },
+  "dependencies": {
+    "@astrojs/cloudflare": "^14.4.2",
+    "@party/db": "workspace:*",
+    "@party/domain": "workspace:*",
+    "astro": "^7.4.2"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.12",
+    "@types/node": "^24",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.5",
+    "wrangler": "^4.152.0"
+  }
+}

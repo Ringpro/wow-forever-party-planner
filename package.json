@@ -1,0 +1,19 @@
+{
+  "name": "party-planner",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.15.4",
+  "engines": {
+    "node": ">=22.23.4"
+  },
+  "scripts": {
+    "dev": "pnpm --filter web dev",
+    "build": "pnpm --filter web build",
+    "deploy": "pnpm --filter web deploy",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "db:generate": "pnpm --filter @party/db generate",
+    "db:migrate:local": "pnpm --filter web db:migrate:local",
+    "db:migrate:remote": "pnpm --filter web db:migrate:remote"
+  }
+}
