@@ -2,7 +2,7 @@
 
 See which quests you share with your group. Works on its own; no website account needed.
 
-> **Status:** v0.1, written against the documented WoW Forever (Mainline) API before launch. Not yet tested in-game; see the launch-day checklist in [docs/addon-feasibility.md](../docs/addon-feasibility.md).
+> **Status:** v0.1, written against the documented WoW Forever (Mainline) API. Being tested on the beta; see the checklist in [docs/addon-feasibility.md](../docs/addon-feasibility.md).
 
 ## What it does
 
@@ -14,12 +14,12 @@ See which quests you share with your group. Works on its own; no website account
 
 ## Installing for development
 
-Copy (or link) the `PartyPlanner` folder into your game's AddOns folder, so you end up with `.../Interface/AddOns/PartyPlanner/PartyPlanner.toc`. The WoW Forever client's folder name isn't confirmed yet; look for the `_forever_` (or similar) folder next to `_retail_` in your World of Warcraft install.
+Copy (or link) the `PartyPlanner` folder into your game's AddOns folder, so you end up with `.../Interface/AddOns/PartyPlanner/PartyPlanner.toc`. On the beta that's `World of Warcraft\_classic_beta_\Interface\AddOns\`. The live client's folder isn't known yet.
 
-On Windows, a link keeps the game in sync with the repo (run in an admin or developer-mode terminal):
+On Windows, a directory junction keeps the game in sync with the repo (no admin needed). In PowerShell:
 
-```bash
-mklink /D "C:\Program Files (x86)\World of Warcraft\_forever_\Interface\AddOns\PartyPlanner" "C:\path\to\repo\addon\PartyPlanner"
+```powershell
+New-Item -ItemType Junction -Path "C:\Program Files (x86)\World of Warcraft\_classic_beta_\Interface\AddOns\PartyPlanner" -Target "C:\path\to\repo\addon\PartyPlanner"
 ```
 
 Then `/reload` in game after each change.
