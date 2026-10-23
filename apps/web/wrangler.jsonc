@@ -25,8 +25,9 @@
     "crons": ["* * * * *"]
   },
   "vars": {
-    "DISCORD_CLIENT_ID": "",
+    "DISCORD_CLIENT_ID": "1563213022087090206",
+    "DISCORD_PUBLIC_KEY": "91e2bee2f0364fa41c24fb7a459fcb863f01911d6f95851eaa949caa5db81ee0",
     "PUBLIC_BASE_URL": "http://localhost:4321"
   }
-  // Secrets (wrangler secret put / .dev.vars): DISCORD_PUBLIC_KEY, DISCORD_BOT_TOKEN, DISCORD_CLIENT_SECRET
+  // Secrets (wrangler secret put / .dev.vars): DISCORD_BOT_TOKEN, DISCORD_CLIENT_SECRET
 }

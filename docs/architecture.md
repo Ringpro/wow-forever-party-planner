@@ -227,7 +227,7 @@ Implemented in [packages/domain/src/time.ts](../packages/domain/src/time.ts) usi
 | Staging | Later: a second Worker + D1 (`wrangler` environment) when there's more than one person deploying |
 
 - **Cost:** €0 on the Workers Free plan for the pilot (requests, D1 storage and reads are far below the free limits). The thing to watch is the Free plan's small CPU budget per request. If page rendering hits it, Workers Paid is $5/month.
-- **Secrets** (`wrangler secret put`, `.dev.vars` locally): `DISCORD_PUBLIC_KEY`, `DISCORD_BOT_TOKEN`, `DISCORD_CLIENT_SECRET`. Plain vars in `wrangler.jsonc`: `DISCORD_CLIENT_ID`, `PUBLIC_BASE_URL`.
+- **Secrets** (`wrangler secret put`, `.dev.vars` locally): `DISCORD_BOT_TOKEN`, `DISCORD_CLIENT_SECRET`. Plain vars in `wrangler.jsonc`: `DISCORD_CLIENT_ID`, `DISCORD_PUBLIC_KEY`, `PUBLIC_BASE_URL`.
 - **Discord commands** are registered by a small script (global for production, guild-scoped for the dev app so changes show instantly).
 - **Observability:** Workers logs with structured JSON lines and a request ID per interaction; a website admin page for broken boards and failed outbox rows.
 

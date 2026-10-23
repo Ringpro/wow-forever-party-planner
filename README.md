@@ -48,7 +48,7 @@ pnpm dev
 
 Then open <http://localhost:4321/auth/dev?name=Alice> to log in as a fake user (this route only exists in `pnpm dev`). Use a second browser profile with `?name=Bob` to try a group with two people.
 
-To test real Discord login, create an app in the [Discord developer portal](https://discord.com/developers/applications), add `http://localhost:4321/auth/discord/callback` as a redirect, set `DISCORD_CLIENT_ID` in `apps/web/wrangler.jsonc`, and copy `apps/web/.dev.vars.example` to `apps/web/.dev.vars` with your secrets.
+To test real Discord login, create an app in the [Discord developer portal](https://discord.com/developers/applications), add `http://localhost:4321/auth/discord/callback` as a redirect, set `DISCORD_CLIENT_ID` and `DISCORD_PUBLIC_KEY` in `apps/web/wrangler.jsonc`, and copy `apps/web/.dev.vars.example` to `apps/web/.dev.vars` with your secrets.
 
 Checks (the same ones CI runs):
 
@@ -65,8 +65,8 @@ pnpm test
 You need a Cloudflare account (free plan is fine) and a Discord application.
 
 1. From `apps/web`: `npx wrangler d1 create party-planner`, and put the printed id in `wrangler.jsonc`.
-2. Set `DISCORD_CLIENT_ID` and `PUBLIC_BASE_URL` in `wrangler.jsonc`.
-3. Set secrets: `npx wrangler secret put DISCORD_CLIENT_SECRET` (and `DISCORD_PUBLIC_KEY`, `DISCORD_BOT_TOKEN`).
+2. Set `DISCORD_CLIENT_ID`, `DISCORD_PUBLIC_KEY` and `PUBLIC_BASE_URL` in `wrangler.jsonc`.
+3. Set secrets: `npx wrangler secret put DISCORD_CLIENT_SECRET` and `DISCORD_BOT_TOKEN`.
 4. `pnpm db:migrate:remote`, then `pnpm deploy`.
 5. In the Discord portal, add `<PUBLIC_BASE_URL>/auth/discord/callback` as an OAuth redirect and set the Interactions Endpoint URL to `<PUBLIC_BASE_URL>/api/discord/interactions`.
 
