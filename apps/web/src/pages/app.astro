@@ -1,0 +1,98 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { DEFAULT_START, STATUS_ICON, STATUS_LABEL, TIME_OPTIONS, dayLabel } from "../lib/format.ts";
+import { clearAvailability, myEntries, setAvailability, upcomingDays } from "../lib/server/availability.ts";
+import { getDb } from "../lib/server/db.ts";
+import { listMyGroups } from "../lib/server/groups.ts";
+import { UserError } from "../lib/server/users.ts";
+
+const user = Astro.locals.user!;
+const tz = user.timezone!;
+const db = getDb();
+let error: string | null = null;
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  const day = String(form.get("day") ?? "");
+  const status = String(form.get("status") ?? "");
+  try {
+    if (status === "clear") {
+      await clearAvailability(db, user.id, day);
+    } else {
+      await setAvailability(db, user, {
+        day,
+        status,
+        startLocal: String(form.get("start") ?? "") || null,
+        endLocal: String(form.get("end") ?? "") || null,
+      });
+    }
+    return Astro.redirect(`/app#d-${day}`);
+  } catch (e) {
+    if (!(e instanceof UserError)) throw e;
+    error = e.message;
+  }
+}
+
+const days = upcomingDays(tz);
+const entries = await myEntries(db, user.id, days);
+const groups = await listMyGroups(db, user.id);
+---
+
+<Layout title="My week">
+  <h1>My week</h1>
+  <p class="muted">
+    Times in {tz.replaceAll("_", " ")} · <a href="/onboarding?return_to=/app">change</a>
+  </p>
+  {error && <p class="error">{error}</p>}
+
+  {days.map((day) => {
+    const entry = entries.get(day);
+    const status = entry?.status ?? "unknown";
+    return (
+      <form method="post" class="card day" id={`d-${day}`}>
+        <input type="hidden" name="day" value={day} />
+        <div class="day-head">
+          <strong>{dayLabel(day)}</strong>
+          <span class={`pill ${status}`}>
+            {status === "unknown" ? "Not set" : `${STATUS_ICON[status]} ${STATUS_LABEL[status]}`}
+            {entry?.startLocal && ` from ${entry.startLocal}`}
+            {entry?.endLocal && ` until ${entry.endLocal}`}
+          </span>
+        </div>
+        <div class="times">
+          <label>
+            From
+            <select name="start">
+              {TIME_OPTIONS.map((t) => <option selected={t === (entry?.startLocal ?? DEFAULT_START)}>{t}</option>)}
+            </select>
+          </label>
+          <label>
+            Until
+            <select name="end">
+              <option value="">—</option>
+              {TIME_OPTIONS.map((t) => <option selected={t === entry?.endLocal}>{t}</option>)}
+            </select>
+          </label>
+        </div>
+        <div class="status-buttons">
+          <button class="status yes" name="status" value="yes" aria-pressed={status === "yes" ? "true" : "false"}>✓ Yes</button>
+          <button class="status maybe" name="status" value="maybe" aria-pressed={status === "maybe" ? "true" : "false"}>~ Maybe</button>
+          <button class="status no" name="status" value="no" aria-pressed={status === "no" ? "true" : "false"}>✗ No</button>
+          {entry && <button class="status clear" name="status" value="clear">Clear</button>}
+        </div>
+      </form>
+    );
+  })}
+
+  <h2>My groups</h2>
+  {groups.length === 0 && <p class="muted">You're not in a group yet. Create one, or ask a friend for an invite link.</p>}
+  <ul class="group-list">
+    {groups.map((g) => (
+      <li>
+        <a href={`/groups/${g.id}`}>{g.name}</a>
+        {g.role === "admin" && <span class="muted"> · admin</span>}
+      </li>
+    ))}
+  </ul>
+  <a class="button secondary" href="/groups/new">Create a group</a>
+</Layout>

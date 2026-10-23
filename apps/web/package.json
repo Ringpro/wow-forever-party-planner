@@ -16,7 +16,8 @@
     "@astrojs/cloudflare": "^14.4.2",
     "@party/db": "workspace:*",
     "@party/domain": "workspace:*",
-    "astro": "^7.4.2"
+    "astro": "^7.4.2",
+    "drizzle-orm": "^0.45.4"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.12",

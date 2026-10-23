@@ -1,0 +1,47 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import { getDb } from "../../lib/server/db.ts";
+import { findInvite, joinGroup } from "../../lib/server/groups.ts";
+import { UserError } from "../../lib/server/users.ts";
+
+const user = Astro.locals.user!;
+const token = Astro.params.token ?? "";
+const db = getDb();
+let error: string | null = null;
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  try {
+    const groupId = await joinGroup(db, user.id, token, form.get("share") === "on");
+    return Astro.redirect(`/groups/${groupId}`);
+  } catch (e) {
+    if (!(e instanceof UserError)) throw e;
+    error = e.message;
+  }
+}
+
+const invite = await findInvite(db, token);
+if (!invite) Astro.response.status = 404;
+---
+
+<Layout title="Join a group">
+  {invite ? (
+    <>
+      <h1>Join {invite.groupName}</h1>
+      <form method="post" class="card stack">
+        {error && <p class="error">{error}</p>}
+        <label class="check">
+          <input type="checkbox" name="share" checked />
+          Share my availability with this group
+        </label>
+        <p class="muted">You can change this any time. Members only see what you share with them.</p>
+        <button class="button" type="submit">Join group</button>
+      </form>
+    </>
+  ) : (
+    <>
+      <h1>Invite not valid</h1>
+      <p class="muted">{error ?? "This invite link has expired or been reset. Ask the group for a new one."}</p>
+    </>
+  )}
+</Layout>

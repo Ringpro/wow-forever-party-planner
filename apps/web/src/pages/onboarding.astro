@@ -1,0 +1,46 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { getDb } from "../lib/server/db.ts";
+import { safeReturnTo } from "../lib/server/session.ts";
+import { UserError, setTimezone } from "../lib/server/users.ts";
+
+const user = Astro.locals.user!;
+const returnTo = safeReturnTo(Astro.url.searchParams.get("return_to"));
+let error: string | null = null;
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  try {
+    await setTimezone(getDb(), user.id, String(form.get("timezone") ?? ""));
+    return Astro.redirect(returnTo);
+  } catch (e) {
+    if (!(e instanceof UserError)) throw e;
+    error = e.message;
+  }
+}
+
+const zones = Intl.supportedValuesOf("timeZone");
+const current = user.timezone ?? "Europe/Copenhagen";
+---
+
+<Layout title="Your time zone">
+  <h1>Hi {user.displayName}</h1>
+  <form method="post" class="card">
+    <label for="timezone"><strong>Your time zone</strong></label>
+    <p class="muted">Used to show everyone's times in your local time.</p>
+    {error && <p class="error">{error}</p>}
+    <select id="timezone" name="timezone" required data-autodetect={user.timezone ? undefined : "true"}>
+      {zones.map((z) => <option value={z} selected={z === current}>{z.replaceAll("_", " ")}</option>)}
+    </select>
+    <button class="button" type="submit">Continue</button>
+  </form>
+</Layout>
+
+<script>
+  // Preselect the browser's time zone when the user hasn't picked one yet.
+  const select = document.getElementById("timezone");
+  const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (select instanceof HTMLSelectElement && select.dataset.autodetect) {
+    if ([...select.options].some((o) => o.value === browserZone)) select.value = browserZone;
+  }
+</script>

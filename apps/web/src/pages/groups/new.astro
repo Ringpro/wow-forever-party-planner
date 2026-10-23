@@ -1,0 +1,48 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import { getDb } from "../../lib/server/db.ts";
+import { createGroup } from "../../lib/server/groups.ts";
+import { UserError } from "../../lib/server/users.ts";
+
+const user = Astro.locals.user!;
+let error: string | null = null;
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  try {
+    const groupId = await createGroup(getDb(), user.id, {
+      name: String(form.get("name") ?? ""),
+      timezone: String(form.get("timezone") ?? ""),
+      minPlayers: Number(form.get("minPlayers")),
+    });
+    return Astro.redirect(`/groups/${groupId}`);
+  } catch (e) {
+    if (!(e instanceof UserError)) throw e;
+    error = e.message;
+  }
+}
+
+const zones = Intl.supportedValuesOf("timeZone");
+---
+
+<Layout title="Create a group">
+  <h1>Create a group</h1>
+  <form method="post" class="card stack">
+    {error && <p class="error">{error}</p>}
+    <label>
+      Name
+      <input name="name" required maxlength="60" placeholder="The Dads" />
+    </label>
+    <label>
+      Group time zone <span class="muted">(used for the Discord board)</span>
+      <select name="timezone">
+        {zones.map((z) => <option value={z} selected={z === user.timezone}>{z.replaceAll("_", " ")}</option>)}
+      </select>
+    </label>
+    <label>
+      Players needed for a session
+      <input name="minPlayers" type="number" min="1" max="40" value="3" required />
+    </label>
+    <button class="button" type="submit">Create group</button>
+  </form>
+</Layout>

@@ -1,0 +1,132 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import { STATUS_ICON, STATUS_LABEL, dayLabel, timeIn } from "../../lib/format.ts";
+import { groupWeek } from "../../lib/server/availability.ts";
+import { getDb } from "../../lib/server/db.ts";
+import { getInviteToken, leaveGroup, makeAdmin, resetInvite, setSharing } from "../../lib/server/groups.ts";
+import { UserError } from "../../lib/server/users.ts";
+
+const user = Astro.locals.user!;
+const tz = user.timezone!;
+const groupId = Astro.params.id ?? "";
+const db = getDb();
+let error: string | null = null;
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  const action = String(form.get("action") ?? "");
+  try {
+    if (action === "share") await setSharing(db, user.id, groupId, form.get("share") === "on");
+    else if (action === "reset_invite") await resetInvite(db, user.id, groupId);
+    else if (action === "make_admin") await makeAdmin(db, user.id, groupId, String(form.get("memberId") ?? ""));
+    else if (action === "leave") {
+      await leaveGroup(db, user.id, groupId);
+      return Astro.redirect("/app");
+    }
+    return Astro.redirect(`/groups/${groupId}`);
+  } catch (e) {
+    if (!(e instanceof UserError)) throw e;
+    error = e.message;
+  }
+}
+
+const week = await groupWeek(db, user, groupId);
+if (!week) return new Response("Not found", { status: 404 });
+const { group, membership } = week;
+const isAdmin = membership.role === "admin";
+const inviteUrl = isAdmin ? `${Astro.url.origin}/join/${await getInviteToken(db, user.id, groupId)}` : null;
+---
+
+<Layout title={group.name}>
+  <h1>{group.name}</h1>
+  <p class="muted">
+    {week.members.length} {week.members.length === 1 ? "member" : "members"} · {group.minPlayers} needed for a session ·
+    times in {tz.replaceAll("_", " ")}
+  </p>
+  {error && <p class="error">{error}</p>}
+  {!membership.shareAvailability && (
+    <p class="notice">You're not sharing your availability with this group, so you show as "?" here.</p>
+  )}
+
+  {week.days.map(({ day, members, counts, best }) => (
+    <section class="card day">
+      <div class="day-head">
+        <strong>{dayLabel(day)}</strong>
+        <span class="muted">✓ {counts.yes} · ~ {counts.maybe} · ? {counts.unknown}</span>
+      </div>
+      {best ? (
+        <p class={best.includesMaybe ? "best maybe" : "best yes"}>
+          {best.memberIds.length} can play from <strong>{timeIn(best.startsAt, tz)}</strong>
+          {best.includesMaybe && " (counting Maybes)"}
+          {best.memberIds.length >= 5 && !best.includesMaybe && " · full party"}
+        </p>
+      ) : (
+        <p class="best none">Not enough players yet</p>
+      )}
+      <ul class="members">
+        {members.map((m) => (
+          <li class={m.status}>
+            <span class={`pill ${m.status}`}>{STATUS_ICON[m.status]} {STATUS_LABEL[m.status]}</span>
+            <span>{m.displayName}</span>
+            {m.startsAt !== null && (
+              <span class="muted">
+                {timeIn(m.startsAt, tz)}–{m.endsAt !== null && timeIn(m.endsAt, tz)}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  ))}
+
+  <section class="card stack">
+    <h2>Settings</h2>
+    <form method="post">
+      <input type="hidden" name="action" value="share" />
+      <label class="check">
+        <input type="checkbox" name="share" checked={membership.shareAvailability} />
+        Share my availability with this group
+      </label>
+      <button class="button secondary" type="submit">Save</button>
+    </form>
+
+    {inviteUrl && (
+      <div>
+        <h3>Invite link</h3>
+        <p class="muted">Anyone with this link can join. Reset it if it ends up somewhere it shouldn't.</p>
+        <input class="invite" readonly value={inviteUrl} onclick="this.select()" />
+        <form method="post">
+          <input type="hidden" name="action" value="reset_invite" />
+          <button class="button secondary" type="submit">Reset link</button>
+        </form>
+      </div>
+    )}
+
+    <div>
+      <h3>Members</h3>
+      <ul class="members">
+        {week.members.map((m) => (
+          <li>
+            <span>{m.displayName}</span>
+            {m.role === "admin" ? (
+              <span class="muted">admin</span>
+            ) : (
+              isAdmin && (
+                <form method="post">
+                  <input type="hidden" name="action" value="make_admin" />
+                  <input type="hidden" name="memberId" value={m.userId} />
+                  <button class="link" type="submit">Make admin</button>
+                </form>
+              )
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+
+    <form method="post">
+      <input type="hidden" name="action" value="leave" />
+      <button class="button danger" type="submit">Leave group</button>
+    </form>
+  </section>
+</Layout>

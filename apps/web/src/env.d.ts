@@ -7,3 +7,9 @@ declare namespace Cloudflare {
     DISCORD_CLIENT_SECRET: string;
   }
 }
+
+declare namespace App {
+  interface Locals {
+    user: import("./lib/server/session.ts").SessionUser | null;
+  }
+}
