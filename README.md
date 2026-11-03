@@ -78,9 +78,9 @@ pnpm test
 You need a Cloudflare account (free plan is fine) and a Discord application.
 
 1. From `apps/web`: `npx wrangler d1 create party-planner`, and put the printed id in `wrangler.jsonc`.
-2. Set `DISCORD_CLIENT_ID`, `DISCORD_PUBLIC_KEY` and `PUBLIC_BASE_URL` in `wrangler.jsonc`.
+2. Set `DISCORD_CLIENT_ID`, `DISCORD_PUBLIC_KEY` and `PUBLIC_BASE_URL` (your `*.workers.dev` address) in `wrangler.jsonc`. Keep `PUBLIC_BASE_URL=http://localhost:4321` in `.dev.vars` for local development.
 3. Set secrets: `npx wrangler secret put DISCORD_CLIENT_SECRET` and `DISCORD_BOT_TOKEN`.
-4. `pnpm db:migrate:remote`, then `pnpm deploy`.
+4. `pnpm db:migrate:remote`, then `pnpm run deploy` (plain `pnpm deploy` is a different, built-in pnpm command).
 5. In the Discord portal, add `<PUBLIC_BASE_URL>/auth/discord/callback` as an OAuth redirect and set the Interactions Endpoint URL to `<PUBLIC_BASE_URL>/api/discord/interactions`.
 
 **Never commit secrets.** They belong in `wrangler secret` (production) or `apps/web/.dev.vars` (local, ignored by git). Client IDs, the Discord public key and D1 database IDs aren't secret.

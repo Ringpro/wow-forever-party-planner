@@ -12,9 +12,9 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "party-planner",
-      // Replace with the id printed by `wrangler d1 create party-planner`.
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_name": "wow-forever-party-planner",
+      // Your own copy: replace with the id printed by `wrangler d1 create <name>`.
+      "database_id": "bf814a6f-4bd1-4465-92e4-113386143ab2",
       "migrations_dir": "../../packages/db/migrations"
     }
   ],
@@ -27,7 +27,8 @@
   "vars": {
     "DISCORD_CLIENT_ID": "1563213022087090206",
     "DISCORD_PUBLIC_KEY": "91e2bee2f0364fa41c24fb7a459fcb863f01911d6f95851eaa949caa5db81ee0",
-    "PUBLIC_BASE_URL": "http://localhost:4321"
+    // Production address. Local development overrides it in .dev.vars.
+    "PUBLIC_BASE_URL": "https://party-planner.jacob-093.workers.dev"
   }
   // Secrets (wrangler secret put / .dev.vars): DISCORD_BOT_TOKEN, DISCORD_CLIENT_SECRET
 }

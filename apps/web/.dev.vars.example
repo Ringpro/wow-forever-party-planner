@@ -2,3 +2,5 @@
 # Client Secret: OAuth2 page → Reset Secret. Bot Token: Bot page → Reset Token. Both are shown only once.
 DISCORD_BOT_TOKEN=
 DISCORD_CLIENT_SECRET=
+# Overrides the production address in wrangler.jsonc while running `pnpm dev`.
+PUBLIC_BASE_URL=http://localhost:4321

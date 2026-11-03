@@ -223,7 +223,7 @@ Implemented in [packages/domain/src/time.ts](../packages/domain/src/time.ts) usi
 | Environment | How |
 | --- | --- |
 | Local | `pnpm dev`: Astro dev server running in `workerd` with a local D1 (`pnpm db:migrate:local`). Discord dev app pointed at a tunnel (e.g. `cloudflared tunnel`) for interactions. |
-| Production | `pnpm deploy` (build + `wrangler deploy`), `pnpm db:migrate:remote` for migrations |
+| Production | `pnpm run deploy` (build + `wrangler deploy`), `pnpm db:migrate:remote` for migrations |
 | Staging | Later: a second Worker + D1 (`wrangler` environment) when there's more than one person deploying |
 
 - **Cost:** €0 on the Workers Free plan for the pilot (requests, D1 storage and reads are far below the free limits). The thing to watch is the Free plan's small CPU budget per request. If page rendering hits it, Workers Paid is $5/month.
