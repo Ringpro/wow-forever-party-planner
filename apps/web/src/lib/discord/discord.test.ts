@@ -183,13 +183,13 @@ describe("board and who", () => {
   };
   const mentions = new Map([["u1", "111111111111"]]);
 
-  it("puts one line per day on the board, with clickable names for today only", () => {
+  it("puts one line per day on the board, with clickable names for today and tomorrow only", () => {
     const m = boardMessage({
       groupId: "g1",
       groupName: "The Dads",
       tz: "Europe/Copenhagen",
       minPlayers: 2,
-      days: [day, { ...day, day: "2026-10-29" }],
+      days: [day, { ...day, day: "2026-10-29" }, { ...day, day: "2026-10-30" }],
       freeNow: [{ displayName: "Carsten", until: at("2026-10-28T21:30:00Z") }],
       mentions,
       websiteUrl: "https://example.test",
@@ -201,7 +201,8 @@ describe("board and who", () => {
     expect(text).toContain(`\`Today  ~21:00\`  ${strip}  2 with Maybes`);
     expect(text).toContain("`Thu 29 ~21:00`");
     expect(text).toContain("> <@111111111111> 20:30  ·  **Bo** 21:00 (maybe)");
-    expect(text.match(/<@111111111111>/g)).toHaveLength(1);
+    expect(text.match(/<@111111111111>/g)).toHaveLength(2);
+    expect(text).toContain("`Fri 30 ~21:00`");
     expect(text).toContain("**Carsten** is free right now, until 22:30");
     expect(text).not.toContain("Hidden");
     expect(m.allowed_mentions).toEqual({ parse: [] });

@@ -6,6 +6,7 @@
 // Reads DISCORD_CLIENT_ID from wrangler.jsonc and DISCORD_BOT_TOKEN from .dev.vars (or the environment).
 import { readFileSync, writeFileSync } from "node:fs";
 import { COMMANDS } from "../src/lib/discord/commands.ts";
+import { DOT_EMOJI_NAMES, OLD_DOT_EMOJI_NAMES } from "../src/lib/discord/emoji-names.ts";
 import { DOT_COLOURS, dotPng } from "./dot-emoji.ts";
 
 const API = "https://discord.com/api/v10";
@@ -75,13 +76,17 @@ console.log("App tags and install settings updated (server install includes the 
 if (siteUrl) console.log(`Policy links for the Developer Portal: ${siteUrl}/privacy and ${siteUrl}/terms`);
 if (endpoint) console.log(`Interactions endpoint: ${app.interactions_endpoint_url}`);
 
-// Board dots as app emojis. Existing ones are kept, so ids stay stable.
+// Board dots as app emojis. Existing ones are kept (renamed if their name changed), so ids stay stable.
 type AppEmoji = { id: string; name: string };
 const existing = ((await call("GET", `/applications/${clientId}/emojis`)) as { items: AppEmoji[] }).items;
 const ids: Record<string, string> = {};
-for (const [kind, colour] of Object.entries(DOT_COLOURS)) {
-  const name = `mu_${kind}`;
-  const found = existing.find((e) => e.name === name);
+for (const [kind, colour] of Object.entries(DOT_COLOURS) as [keyof typeof DOT_COLOURS, (typeof DOT_COLOURS)[keyof typeof DOT_COLOURS]][]) {
+  const name = DOT_EMOJI_NAMES[kind];
+  const found = existing.find((e) => e.name === name) ?? existing.find((e) => e.name === OLD_DOT_EMOJI_NAMES[kind]);
+  if (found && found.name !== name) {
+    await call("PATCH", `/applications/${clientId}/emojis/${found.id}`, { name });
+    console.log(`Renamed emoji :${found.name}: to :${name}:`);
+  }
   ids[kind] = found
     ? found.id
     : ((await call("POST", `/applications/${clientId}/emojis`, {

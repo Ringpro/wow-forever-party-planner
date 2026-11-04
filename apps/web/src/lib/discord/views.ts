@@ -3,6 +3,7 @@
 // box with the gold accent stripe, matching the mockups.
 import { addMinutesInGamingDay, isoWeekday, type LocalDate, type Status, type WallTime } from "@muster/domain";
 import { DEFAULT_START, DISCORD_TIME_OPTIONS, dayLabel, timeIn, timeOptionsWith } from "../format.ts";
+import { DOT_EMOJI_NAMES } from "./emoji-names.ts";
 import EMOJI_IDS from "./emojis.json";
 import {
   card,
@@ -47,11 +48,15 @@ const UNICODE_DOT = { yes: "🟢", maybe: "🟡", no: "🔴", unknown: "⚪" } a
  * (`pnpm discord:register` writes their ids to emojis.json), else the standard emoji circles.
  */
 const CUSTOM_IDS = EMOJI_IDS as Partial<Record<DotKind, string>>;
+function customDot(kind: DotKind): string {
+  const id = CUSTOM_IDS[kind];
+  return id ? `<:${DOT_EMOJI_NAMES[kind]}:${id}>` : UNICODE_DOT[kind];
+}
 export const BOARD_DOT: Record<DotKind, string> = {
-  yes: CUSTOM_IDS.yes ? `<:mu_yes:${CUSTOM_IDS.yes}>` : UNICODE_DOT.yes,
-  maybe: CUSTOM_IDS.maybe ? `<:mu_maybe:${CUSTOM_IDS.maybe}>` : UNICODE_DOT.maybe,
-  no: CUSTOM_IDS.no ? `<:mu_no:${CUSTOM_IDS.no}>` : UNICODE_DOT.no,
-  unknown: CUSTOM_IDS.unknown ? `<:mu_unknown:${CUSTOM_IDS.unknown}>` : UNICODE_DOT.unknown,
+  yes: customDot("yes"),
+  maybe: customDot("maybe"),
+  no: customDot("no"),
+  unknown: customDot("unknown"),
 };
 const MAX_DOTS = 12;
 
@@ -323,7 +328,8 @@ export function boardMessage(input: BoardInput): MessagePayload {
   const lines: string[] = [];
   input.days.forEach((d, i) => {
     lines.push(`${dayChip(d, tz, i === 0)}  ${dots(d)}  ${note(d, groupSize)}`);
-    if (i === 0) {
+    // Who's playing today and tomorrow; later days only show how many ("Who's on?" has the names).
+    if (i <= 1) {
       const playing = d.members.filter((m) => m.status === "yes" || m.status === "maybe");
       if (playing.length > 0) lines.push(`> ${playing.map((m) => who(m, tz, input.mentions)).join("  ·  ")}`);
     }
