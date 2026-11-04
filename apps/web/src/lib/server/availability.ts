@@ -513,7 +513,13 @@ export async function sharedGroupNames(db: Db, userId: string): Promise<string[]
 
 // ── Group week ───────────────────────────────────────────────────────────────────────────
 
-export type MemberSlot = { status: "yes" | "maybe"; startsAt: number; endsAt: number };
+/**
+ * One Yes/Maybe time. An answer without an end time ("until late") still gets an `endsAt`
+ * (start + the member's usual session length) for the overlap maths; `openEnd` says to show it as "late".
+ */
+export type MemberSlot = { status: "yes" | "maybe"; startsAt: number; endsAt: number; openEnd: boolean };
+
+const isOpenEnd = (s: { startLocal: string | null; endLocal: string | null }) => !s.endLocal || s.endLocal === s.startLocal;
 
 export type GroupMemberDay = {
   userId: string;
@@ -662,7 +668,7 @@ async function loadWeek(db: Db, group: Group, days: LocalDate[]): Promise<WeekVi
           if (visible.length === 0) return hidden;
           const slots = visible
             .filter((e) => e.status !== "no" && e.startsAt !== null && e.endsAt !== null)
-            .map((e) => ({ status: e.status as "yes" | "maybe", startsAt: e.startsAt!, endsAt: e.endsAt! }))
+            .map((e) => ({ status: e.status as "yes" | "maybe", startsAt: e.startsAt!, endsAt: e.endsAt!, openEnd: isOpenEnd(e) }))
             .sort((a, b) => a.startsAt - b.startsAt);
           return {
             ...hidden,
@@ -678,7 +684,9 @@ async function loadWeek(db: Db, group: Group, days: LocalDate[]): Promise<WeekVi
         if (fallback.kind === "unknown" || !visibleInGroup(groupId, membership, null)) return hidden;
         const slots = fallback.slots.flatMap((s) => {
           const interval = answerInterval(day, s, m.defaultSessionMinutes);
-          return interval ? [{ status: s.status as "yes" | "maybe", startsAt: interval.start, endsAt: interval.end }] : [];
+          return interval
+            ? [{ status: s.status as "yes" | "maybe", startsAt: interval.start, endsAt: interval.end, openEnd: isOpenEnd(s) }]
+            : [];
         });
         return {
           ...hidden,

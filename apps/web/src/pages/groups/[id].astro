@@ -89,6 +89,7 @@ const roleName = new Map(roles.map((r) => [r.id, r.name]));
 const zones = Intl.supportedValuesOf("timeZone");
 const today = weeks[0]!.days[0]!;
 const time = (instant: number) => timeIn(instant, tz);
+const until = (s: { endsAt: number; openEnd: boolean }) => (s.openEnd ? "late" : time(s.endsAt));
 
 // The party: levels, factions, realm types and roles of members' mains.
 const mains = week.members.flatMap((m) => {
@@ -196,9 +197,9 @@ const kindLabel = kind === "server" ? "Discord server" : kind === "squad" ? `Squ
                   {md.status === "unknown" && <span class="lbl-none">No answer</span>}
                   {md.status === "no" && <span class="lbl-no">Can't play</span>}
                   {md.slots.map((s) => (
-                    <span class={`t-${s.status}`} title={`${s.status === "maybe" ? "Maybe" : "Yes"} ${time(s.startsAt)}–${time(s.endsAt)}`}>
+                    <span class={`t-${s.status}`} title={`${s.status === "maybe" ? "Maybe" : "Yes"} ${time(s.startsAt)}–${until(s)}`}>
                       <strong>{s.status === "maybe" && "~"}{time(s.startsAt)}</strong>
-                      <span class="until">–{time(s.endsAt)}</span>
+                      <span class="until">–{until(s)}</span>
                     </span>
                   ))}
                 </span>
@@ -241,7 +242,7 @@ const kindLabel = kind === "server" ? "Discord server" : kind === "squad" ? `Squ
                       {m.slots.map((s) => (
                         <span class={`t-${s.status}`}>
                           {s.status === "maybe" && "~"}
-                          {time(s.startsAt)}–{time(s.endsAt)}
+                          {time(s.startsAt)}–{until(s)}
                         </span>
                       ))}
                     </span>

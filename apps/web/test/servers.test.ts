@@ -104,6 +104,13 @@ describe("Discord servers", () => {
     expect(row(await groupWeek(db, bo, dads), days[1]!, "Anders")?.status).toBe("yes");
   });
 
+  it("marks times without an end as open-ended, so the group sees 'late'", async () => {
+    await setAvailability(db, anders, { day: days[2]!, status: "yes", startLocal: "20:30", endLocal: null }, "web");
+    await setAvailability(db, anders, { day: days[3]!, status: "yes", startLocal: "20:30", endLocal: "23:00" }, "web");
+    expect(row(await groupWeek(db, bo, dads), days[2]!, "Anders")?.slots[0]?.openEnd).toBe(true);
+    expect(row(await groupWeek(db, bo, dads), days[3]!, "Anders")?.slots[0]?.openEnd).toBe(false);
+  });
+
   it("leaves servers the user is no longer in, but never touches invite groups", async () => {
     await syncServerMemberships(db, anders.id, [{ groupId: dads, admin: true }], { complete: true, shareByDefault: false });
     const ids = (await listMyGroups(db, anders.id)).map((g) => g.id);
