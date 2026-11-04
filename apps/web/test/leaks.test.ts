@@ -177,9 +177,9 @@ describe("copy week forward", () => {
 
     expect(await copyWeekForward(db, ivan)).toBe(1);
     const next = await myEntries(db, ivan.id, [1, 2, 3].map((i) => addDays(days[i - 1]!, 7)));
-    expect(next.get(addDays(days[0]!, 7))).toMatchObject({ status: "yes", startLocal: "20:00" });
+    expect(next.get(addDays(days[0]!, 7))?.[0]).toMatchObject({ status: "yes", startLocal: "20:00" });
     expect(next.has(addDays(days[1]!, 7))).toBe(false);
-    expect(next.get(addDays(days[2]!, 7))?.status).toBe("no");
+    expect(next.get(addDays(days[2]!, 7))?.[0]?.status).toBe("no");
   });
 });
 
@@ -189,7 +189,7 @@ describe("leaving a group", () => {
     const view = await groupWeek(db, anders, dads);
     expect(view!.members.map((m) => m.displayName)).toEqual(["Anders"]);
     expect(row(view, days[0]!, "Bo")).toBeUndefined();
-    expect((await myEntries(db, bo.id, [days[0]!])).get(days[0]!)?.status).toBe("yes");
+    expect((await myEntries(db, bo.id, [days[0]!])).get(days[0]!)?.[0]?.status).toBe("yes");
     expect(await groupWeek(db, bo, dads)).toBeNull();
   });
 });

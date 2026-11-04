@@ -1,37 +1,45 @@
-// Availability use cases: the user's own days, free-now status, and a group's week.
+// Availability use cases: the user's own days (with several time slots), weekly defaults,
+// free-now status, and a group's week.
 import { schema, type Db } from "@muster/db";
 import {
   addDays,
   addMinutesInGamingDay,
   answerInterval,
   bestStart,
+  dayStatus,
   gamingDay,
   isValidLocalDate,
   isValidWallTime,
   isoWeekday,
   minutesIntoGamingDay,
   resolveEffective,
+  sortSlots,
   visibleInGroup,
+  type AvailabilityAnswer,
   type BestStart,
   type EffectiveAvailability,
   type IsoWeekday,
   type LocalDate,
-  type WeeklyDefaults,
   type MemberInterval,
   type Status,
   type WallTime,
+  type WeeklyDefaults,
 } from "@muster/domain";
 import { and, eq, gt, inArray } from "drizzle-orm";
+import { mainCharacters, type MainCharacter } from "./characters.ts";
 import { getGroupAsMember, type Group, type Membership } from "./groups.ts";
 import type { SessionUser } from "./session.ts";
 import { UserError } from "./users.ts";
 
-const STATUSES: readonly Status[] = ["yes", "maybe", "no"];
 const MAX_DAYS_AHEAD = 60;
+const MAX_SLOTS = 4;
 const DOUBLE_TAP_MS = 5_000;
+const NEW_SLOT_START: WallTime = "12:00";
 
 export type Entry = typeof schema.availabilityEntries.$inferSelect;
 export type Source = Entry["source"];
+/** One Yes/Maybe time slot as the user enters it. */
+export type SlotInput = { status: "yes" | "maybe"; startLocal: WallTime; endLocal: WallTime | null };
 
 /** The next `count` gaming days starting today in `tz`. */
 export function upcomingDays(tz: string, count = 7): LocalDate[] {
@@ -60,49 +68,84 @@ export function planningDays(tz: string): LocalDate[] {
   return planningWeeks(tz).flatMap((w) => w.days);
 }
 
+// ── Validation ───────────────────────────────────────────────────────────────────────────
+
+function requireTimezone(user: SessionUser): string {
+  if (!user.timezone) throw new UserError("Pick your time zone first.");
+  return user.timezone;
+}
+
+function requireEditableDay(user: SessionUser, day: string): LocalDate {
+  const today = gamingDay(Date.now(), requireTimezone(user));
+  if (!isValidLocalDate(day) || day < today || day > addDays(today, MAX_DAYS_AHEAD)) {
+    throw new UserError("That day can't be changed.");
+  }
+  return day;
+}
+
+function slotInput(input: { status: string; startLocal: string | null; endLocal: string | null }): SlotInput {
+  if (input.status !== "yes" && input.status !== "maybe") throw new UserError("Pick Yes or Maybe.");
+  if (!input.startLocal || !isValidWallTime(input.startLocal)) throw new UserError("Pick a start time.");
+  if (input.endLocal && !isValidWallTime(input.endLocal)) throw new UserError("That end time isn't valid.");
+  return { status: input.status, startLocal: input.startLocal, endLocal: input.endLocal || null };
+}
+
+function checkSlots(slots: readonly SlotInput[]): SlotInput[] {
+  if (slots.length > MAX_SLOTS) throw new UserError(`A day can have up to ${MAX_SLOTS} times.`);
+  return sortSlots(slots);
+}
+
+// ── Your days ────────────────────────────────────────────────────────────────────────────
+
+/** Replaces everything for a day: either "no", or a list of Yes/Maybe slots. */
+async function writeDay(
+  db: Db,
+  user: SessionUser,
+  day: LocalDate,
+  answer: "no" | readonly SlotInput[],
+  source: Source,
+  extra: { lastRelativeShiftAt?: number } = {},
+): Promise<void> {
+  const tz = requireTimezone(user);
+  const rows =
+    answer === "no"
+      ? [{ status: "no" as const, startLocal: null, endLocal: null }]
+      : checkSlots(answer).map((s) => ({ status: s.status, startLocal: s.startLocal, endLocal: s.endLocal }));
+  const now = Date.now();
+  const inserts = rows.map((row, slot) => {
+    const interval = answerInterval(day, { ...row, tz }, user.defaultSessionMinutes);
+    return db.insert(schema.availabilityEntries).values({
+      id: crypto.randomUUID(),
+      userId: user.id,
+      localDate: day,
+      slot,
+      ...row,
+      tz,
+      startsAt: interval?.start ?? null,
+      endsAt: interval?.end ?? null,
+      source,
+      lastRelativeShiftAt: extra.lastRelativeShiftAt ?? null,
+      updatedAt: now,
+    });
+  });
+  await db.batch([
+    db
+      .delete(schema.availabilityEntries)
+      .where(and(eq(schema.availabilityEntries.userId, user.id), eq(schema.availabilityEntries.localDate, day))),
+    ...inserts,
+  ]);
+}
+
+/** Sets a whole day to a single answer: one Yes/Maybe slot, or No. */
 export async function setAvailability(
   db: Db,
   user: SessionUser,
   input: { day: string; status: string; startLocal: string | null; endLocal: string | null },
   source: Source,
-  extra: { lastRelativeShiftAt?: number } = {},
 ): Promise<void> {
-  if (!user.timezone) throw new UserError("Pick your time zone first.");
-  const status = STATUSES.find((s) => s === input.status);
-  if (!status) throw new UserError("Pick Yes, Maybe or No.");
-  const today = gamingDay(Date.now(), user.timezone);
-  if (!isValidLocalDate(input.day) || input.day < today || input.day > addDays(today, MAX_DAYS_AHEAD)) {
-    throw new UserError("That day can't be changed.");
-  }
-
-  let startLocal: WallTime | null = null;
-  let endLocal: WallTime | null = null;
-  if (status !== "no") {
-    if (!input.startLocal || !isValidWallTime(input.startLocal)) throw new UserError("Pick a start time.");
-    if (input.endLocal && !isValidWallTime(input.endLocal)) throw new UserError("That end time isn't valid.");
-    startLocal = input.startLocal;
-    endLocal = input.endLocal || null;
-  }
-
-  const interval = answerInterval(input.day, { status, startLocal, endLocal, tz: user.timezone }, user.defaultSessionMinutes);
-  const values = {
-    status,
-    startLocal,
-    endLocal,
-    tz: user.timezone,
-    startsAt: interval?.start ?? null,
-    endsAt: interval?.end ?? null,
-    source,
-    lastRelativeShiftAt: extra.lastRelativeShiftAt ?? null,
-    updatedAt: Date.now(),
-  };
-  await db
-    .insert(schema.availabilityEntries)
-    .values({ id: crypto.randomUUID(), userId: user.id, localDate: input.day, ...values })
-    .onConflictDoUpdate({
-      target: [schema.availabilityEntries.userId, schema.availabilityEntries.localDate],
-      set: values,
-    });
+  const day = requireEditableDay(user, input.day);
+  if (input.status === "no") return writeDay(db, user, day, "no", source);
+  await writeDay(db, user, day, [slotInput(input)], source);
 }
 
 export async function clearAvailability(db: Db, userId: string, day: string): Promise<void> {
@@ -111,76 +154,91 @@ export async function clearAvailability(db: Db, userId: string, day: string): Pr
     .where(and(eq(schema.availabilityEntries.userId, userId), eq(schema.availabilityEntries.localDate, day)));
 }
 
-export async function myEntries(db: Db, userId: string, days: LocalDate[]): Promise<Map<LocalDate, Entry>> {
+/** The day's current slots, taking the weekly default when there's no explicit answer. */
+async function currentSlots(db: Db, user: SessionUser, day: LocalDate): Promise<SlotInput[]> {
+  const current = (await myDays(db, user.id, [day])).get(day)!;
+  if (current.kind === "unknown") return [];
+  return current.slots.map((s) => ({ status: s.status as "yes" | "maybe", startLocal: s.startLocal!, endLocal: s.endLocal }));
+}
+
+/**
+ * Changes one slot of a day (by its position, earliest first) or adds it when the index is past
+ * the end. A day that came from the weekly default is copied first, so other slots stay.
+ */
+export async function setSlot(
+  db: Db,
+  user: SessionUser,
+  dayInput: string,
+  index: number,
+  input: { status: string; startLocal: string | null; endLocal: string | null },
+  source: Source,
+): Promise<void> {
+  const day = requireEditableDay(user, dayInput);
+  if (input.status === "no") return writeDay(db, user, day, "no", source);
+  const slots = await currentSlots(db, user, day);
+  const slot = slotInput(input);
+  if (Number.isInteger(index) && index >= 0 && index < slots.length) slots[index] = slot;
+  else slots.push(slot);
+  await writeDay(db, user, day, slots, source);
+}
+
+/** Adds another Yes slot to a day, starting an hour after the last one ends unless a start is given. */
+export async function addSlot(
+  db: Db,
+  user: SessionUser,
+  dayInput: string,
+  source: Source,
+  startLocal?: WallTime,
+): Promise<void> {
+  const day = requireEditableDay(user, dayInput);
+  const slots = await currentSlots(db, user, day);
+  if (slots.length >= MAX_SLOTS) throw new UserError(`A day can have up to ${MAX_SLOTS} times.`);
+  let start = startLocal ?? NEW_SLOT_START;
+  if (!startLocal && slots.length > 0) {
+    const last = slots[slots.length - 1]!;
+    const lastEnd = last.endLocal ?? addMinutesInGamingDay(last.startLocal, user.defaultSessionMinutes);
+    start = (lastEnd && addMinutesInGamingDay(lastEnd, 60)) ?? NEW_SLOT_START;
+  }
+  slots.push({ status: "yes", startLocal: start, endLocal: null });
+  await writeDay(db, user, day, slots, source);
+}
+
+/** Removes one slot. Removing the only explicit slot clears the day (back to the default). */
+export async function removeSlot(db: Db, user: SessionUser, dayInput: string, index: number, source: Source) {
+  const day = requireEditableDay(user, dayInput);
+  const slots = await currentSlots(db, user, day);
+  slots.splice(index, 1);
+  if (slots.length === 0) return clearAvailability(db, user.id, day);
+  await writeDay(db, user, day, slots, source);
+}
+
+/** Explicit rows per day, earliest slot first. */
+export async function myEntries(db: Db, userId: string, days: LocalDate[]): Promise<Map<LocalDate, Entry[]>> {
   const rows = await db
     .select()
     .from(schema.availabilityEntries)
     .where(and(eq(schema.availabilityEntries.userId, userId), inArray(schema.availabilityEntries.localDate, days)));
-  return new Map(rows.map((r) => [r.localDate, r]));
+  const byDay = new Map<LocalDate, Entry[]>();
+  for (const row of rows.sort((a, b) => a.slot - b.slot)) byDay.set(row.localDate, [...(byDay.get(row.localDate) ?? []), row]);
+  return byDay;
 }
 
-// ── Weekly defaults (PRD M4) ─────────────────────────────────────────────────────────────
+const answerOf = (e: { status: Status; startLocal: string | null; endLocal: string | null; tz: string }): AvailabilityAnswer => ({
+  status: e.status,
+  startLocal: e.startLocal,
+  endLocal: e.endLocal,
+  tz: e.tz,
+});
 
-const WEEKDAYS: readonly IsoWeekday[] = [1, 2, 3, 4, 5, 6, 7];
+export type MyDay = EffectiveAvailability & { entries: Entry[] };
 
-async function defaultsFor(db: Db, userIds: string[]): Promise<Map<string, WeeklyDefaults>> {
-  const byUser = new Map<string, WeeklyDefaults>();
-  if (userIds.length === 0) return byUser;
-  const rows = await db.select().from(schema.weeklyDefaults).where(inArray(schema.weeklyDefaults.userId, userIds));
-  for (const r of rows) {
-    const defaults = byUser.get(r.userId) ?? {};
-    defaults[r.weekday as IsoWeekday] = { status: r.status, startLocal: r.startLocal, endLocal: r.endLocal, tz: r.tz };
-    byUser.set(r.userId, defaults);
-  }
-  return byUser;
-}
-
-export async function getWeeklyDefaults(db: Db, userId: string): Promise<WeeklyDefaults> {
-  return (await defaultsFor(db, [userId])).get(userId) ?? {};
-}
-
-export async function setWeeklyDefault(
-  db: Db,
-  user: SessionUser,
-  weekday: number,
-  input: { status: string; startLocal: string | null; endLocal: string | null },
-): Promise<void> {
-  if (!user.timezone) throw new UserError("Pick your time zone first.");
-  const day = WEEKDAYS.find((w) => w === weekday);
-  if (!day) throw new UserError("Unknown weekday.");
-  const status = STATUSES.find((s) => s === input.status);
-  if (!status) throw new UserError("Pick Yes, Maybe or No.");
-  let startLocal: WallTime | null = null;
-  let endLocal: WallTime | null = null;
-  if (status !== "no") {
-    if (!input.startLocal || !isValidWallTime(input.startLocal)) throw new UserError("Pick a start time.");
-    if (input.endLocal && !isValidWallTime(input.endLocal)) throw new UserError("That end time isn't valid.");
-    startLocal = input.startLocal;
-    endLocal = input.endLocal || null;
-  }
-  const values = { status, startLocal, endLocal, tz: user.timezone, updatedAt: Date.now() };
-  await db
-    .insert(schema.weeklyDefaults)
-    .values({ userId: user.id, weekday: day, ...values })
-    .onConflictDoUpdate({ target: [schema.weeklyDefaults.userId, schema.weeklyDefaults.weekday], set: values });
-}
-
-export async function clearWeeklyDefault(db: Db, userId: string, weekday: number): Promise<void> {
-  await db
-    .delete(schema.weeklyDefaults)
-    .where(and(eq(schema.weeklyDefaults.userId, userId), eq(schema.weeklyDefaults.weekday, weekday)));
-}
-
-export type MyDay = EffectiveAvailability & { entry?: Entry };
-
-/** The user's own days: explicit answer, else weekly default, else unknown. */
+/** The user's own days: explicit answers, else weekly default, else unknown. */
 export async function myDays(db: Db, userId: string, days: LocalDate[]): Promise<Map<LocalDate, MyDay>> {
   const [entries, defaults] = await Promise.all([myEntries(db, userId, days), getWeeklyDefaults(db, userId)]);
   return new Map(
     days.map((day) => {
-      const entry = entries.get(day);
-      const effective = resolveEffective(day, entry && { ...entry }, defaults);
-      return [day, entry ? { ...effective, entry } : effective];
+      const rows = entries.get(day) ?? [];
+      return [day, { ...resolveEffective(day, rows.map(answerOf), defaults), entries: rows }];
     }),
   );
 }
@@ -192,73 +250,194 @@ export async function myDays(db: Db, userId: string, days: LocalDate[]): Promise
  * Returns how many days were copied.
  */
 export async function copyWeekForward(db: Db, user: SessionUser): Promise<number> {
-  if (!user.timezone) throw new UserError("Pick your time zone first.");
-  const monday = mondayOf(gamingDay(Date.now(), user.timezone));
+  const monday = mondayOf(gamingDay(Date.now(), requireTimezone(user)));
   const days = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
   const targets = days.map((d) => addDays(d, 7));
   const [current, next] = await Promise.all([myEntries(db, user.id, days), myEntries(db, user.id, targets)]);
   let copied = 0;
   for (const day of days) {
-    const entry = current.get(day);
+    const rows = current.get(day);
     const target = addDays(day, 7);
-    if (!entry || entry.shareScope !== "all_shared_groups" || next.has(target)) continue;
-    await setAvailability(
-      db,
-      user,
-      { day: target, status: entry.status, startLocal: entry.startLocal, endLocal: entry.endLocal },
-      entry.source,
-    );
+    if (!rows || rows.some((r) => r.shareScope !== "all_shared_groups") || next.has(target)) continue;
+    const answer =
+      dayStatus(rows) === "no"
+        ? "no"
+        : rows
+            .filter((r) => r.status !== "no" && r.startLocal)
+            .map((r) => ({ status: r.status as "yes" | "maybe", startLocal: r.startLocal!, endLocal: r.endLocal }));
+    await writeDay(db, user, target, answer, rows[0]!.source);
     copied++;
   }
   return copied;
 }
 
-export type ShiftResult = { day: LocalDate; from: WallTime; to: WallTime; status: "yes" | "maybe"; ignored: boolean };
+// ── Weekly defaults (PRD M4) ─────────────────────────────────────────────────────────────
 
-async function playingOn(db: Db, user: SessionUser, day: LocalDate, message: string) {
-  const current = (await myDays(db, user.id, [day])).get(day);
-  if (!current || current.kind === "unknown" || current.status === "no" || !current.startLocal) {
-    throw new UserError(message);
-  }
-  return { ...current, status: current.status, startLocal: current.startLocal };
+const WEEKDAYS: readonly IsoWeekday[] = [1, 2, 3, 4, 5, 6, 7];
+
+function requireWeekday(weekday: number): IsoWeekday {
+  const day = WEEKDAYS.find((w) => w === weekday);
+  if (!day) throw new UserError("Unknown weekday.");
+  return day;
 }
 
+async function defaultsFor(db: Db, userIds: string[]): Promise<Map<string, WeeklyDefaults>> {
+  const byUser = new Map<string, WeeklyDefaults>();
+  if (userIds.length === 0) return byUser;
+  const rows = await db.select().from(schema.weeklyDefaults).where(inArray(schema.weeklyDefaults.userId, userIds));
+  for (const r of rows.sort((a, b) => a.slot - b.slot)) {
+    const defaults = byUser.get(r.userId) ?? {};
+    const weekday = r.weekday as IsoWeekday;
+    defaults[weekday] = [...(defaults[weekday] ?? []), answerOf(r)];
+    byUser.set(r.userId, defaults);
+  }
+  return byUser;
+}
+
+export async function getWeeklyDefaults(db: Db, userId: string): Promise<WeeklyDefaults> {
+  return (await defaultsFor(db, [userId])).get(userId) ?? {};
+}
+
+async function writeDefault(db: Db, user: SessionUser, weekday: IsoWeekday, answer: "no" | readonly SlotInput[]) {
+  const tz = requireTimezone(user);
+  const rows =
+    answer === "no"
+      ? [{ status: "no" as const, startLocal: null, endLocal: null }]
+      : checkSlots(answer).map((s) => ({ status: s.status, startLocal: s.startLocal, endLocal: s.endLocal }));
+  await db.batch([
+    db
+      .delete(schema.weeklyDefaults)
+      .where(and(eq(schema.weeklyDefaults.userId, user.id), eq(schema.weeklyDefaults.weekday, weekday))),
+    ...rows.map((row, slot) =>
+      db.insert(schema.weeklyDefaults).values({ userId: user.id, weekday, slot, ...row, tz, updatedAt: Date.now() }),
+    ),
+  ]);
+}
+
+async function currentDefaultSlots(db: Db, userId: string, weekday: IsoWeekday): Promise<SlotInput[]> {
+  const answers = (await getWeeklyDefaults(db, userId))[weekday] ?? [];
+  return sortSlots(answers.filter((a) => a.status !== "no" && a.startLocal)).map((a) => ({
+    status: a.status as "yes" | "maybe",
+    startLocal: a.startLocal!,
+    endLocal: a.endLocal,
+  }));
+}
+
+/** Sets a weekday's default to a single answer: one Yes/Maybe slot, or No. */
+export async function setWeeklyDefault(
+  db: Db,
+  user: SessionUser,
+  weekday: number,
+  input: { status: string; startLocal: string | null; endLocal: string | null },
+): Promise<void> {
+  const day = requireWeekday(weekday);
+  if (input.status === "no") return writeDefault(db, user, day, "no");
+  await writeDefault(db, user, day, [slotInput(input)]);
+}
+
+/** Changes (or adds, past the end) one slot of a weekday's default. */
+export async function setDefaultSlot(
+  db: Db,
+  user: SessionUser,
+  weekday: number,
+  index: number,
+  input: { status: string; startLocal: string | null; endLocal: string | null },
+): Promise<void> {
+  const day = requireWeekday(weekday);
+  if (input.status === "no") return writeDefault(db, user, day, "no");
+  const slots = await currentDefaultSlots(db, user.id, day);
+  const slot = slotInput(input);
+  if (Number.isInteger(index) && index >= 0 && index < slots.length) slots[index] = slot;
+  else slots.push(slot);
+  await writeDefault(db, user, day, slots);
+}
+
+export async function addDefaultSlot(db: Db, user: SessionUser, weekday: number): Promise<void> {
+  const day = requireWeekday(weekday);
+  const slots = await currentDefaultSlots(db, user.id, day);
+  if (slots.length >= MAX_SLOTS) throw new UserError(`A day can have up to ${MAX_SLOTS} times.`);
+  const last = slots[slots.length - 1];
+  const lastEnd = last && (last.endLocal ?? addMinutesInGamingDay(last.startLocal, user.defaultSessionMinutes));
+  const start = (lastEnd && addMinutesInGamingDay(lastEnd, 60)) ?? NEW_SLOT_START;
+  await writeDefault(db, user, day, [...slots, { status: "yes", startLocal: start, endLocal: null }]);
+}
+
+export async function removeDefaultSlot(db: Db, user: SessionUser, weekday: number, index: number): Promise<void> {
+  const day = requireWeekday(weekday);
+  const slots = await currentDefaultSlots(db, user.id, day);
+  slots.splice(index, 1);
+  if (slots.length === 0) return clearWeeklyDefault(db, user.id, day);
+  await writeDefault(db, user, day, slots);
+}
+
+export async function clearWeeklyDefault(db: Db, userId: string, weekday: number): Promise<void> {
+  await db
+    .delete(schema.weeklyDefaults)
+    .where(and(eq(schema.weeklyDefaults.userId, userId), eq(schema.weeklyDefaults.weekday, weekday)));
+}
+
+// ── Running late ─────────────────────────────────────────────────────────────────────────
+
+export type ShiftResult = {
+  day: LocalDate;
+  slot: number;
+  from: WallTime;
+  to: WallTime;
+  status: "yes" | "maybe";
+  ignored: boolean;
+};
+
 /**
- * Moves the start of a Yes/Maybe on `day` (explicit or from the weekly default) to `to`, keeping
- * the status. Drops the end time if the new start would be at or after it.
+ * Moves the start of one Yes/Maybe slot on `day` (explicit or from the weekly default) to `to`,
+ * keeping its status. Drops its end time if the new start would be at or after it.
  */
 export async function moveStart(
   db: Db,
   user: SessionUser,
-  day: LocalDate,
+  dayInput: LocalDate,
+  index: number,
   to: WallTime,
   source: Source,
   extra: { lastRelativeShiftAt?: number } = {},
 ): Promise<ShiftResult> {
-  const current = await playingOn(db, user, day, "You haven't said you're playing that day yet. Use Plan my week first.");
-  const endLocal =
-    current.endLocal && minutesIntoGamingDay(current.endLocal) > minutesIntoGamingDay(to) ? current.endLocal : null;
-  await setAvailability(db, user, { day, status: current.status, startLocal: to, endLocal }, source, extra);
-  return { day, from: current.startLocal, to, status: current.status, ignored: false };
+  const day = requireEditableDay(user, dayInput);
+  const slots = await currentSlots(db, user, day);
+  const slot = slots[index];
+  if (!slot) throw new UserError("You haven't said you're playing that day yet. Use Plan my week first.");
+  const endLocal = slot.endLocal && minutesIntoGamingDay(slot.endLocal) > minutesIntoGamingDay(to) ? slot.endLocal : null;
+  slots[index] = { ...slot, startLocal: to, endLocal };
+  await writeDay(db, user, day, slots, source, extra);
+  const moved = sortSlots(slots).indexOf(slots[index]!);
+  return { day, slot: moved, from: slot.startLocal, to, status: slot.status, ignored: false };
 }
 
 /**
- * Relative shift for "+30 min" and `/delay` on today's gaming day (architecture §6.3).
- * A second relative shift within 5 seconds is treated as a double tap and ignored.
+ * Relative shift for "+30 min" and `/delay` on today's gaming day (architecture §6.3). Applies to
+ * the slot you're in or the next one coming up. A second relative shift within 5 seconds is a
+ * double tap and ignored.
  */
 export async function shiftToday(db: Db, user: SessionUser, minutes: number, source: Source): Promise<ShiftResult> {
-  if (!user.timezone) throw new UserError("Pick your time zone first.");
+  const tz = requireTimezone(user);
   const now = Date.now();
-  const day = gamingDay(now, user.timezone);
-  const current = await playingOn(db, user, day, "You haven't said you're playing today yet. Use Plan my week first.");
-  const lastShift = current.entry?.lastRelativeShiftAt;
-  if (lastShift && now - lastShift < DOUBLE_TAP_MS) {
-    return { day, from: current.startLocal, to: current.startLocal, status: current.status, ignored: true };
+  const day = gamingDay(now, tz);
+  const current = (await myDays(db, user.id, [day])).get(day)!;
+  if (current.kind === "unknown" || current.slots.length === 0) {
+    throw new UserError("You haven't said you're playing today yet. Use Plan my week first.");
   }
-  const target = addMinutesInGamingDay(current.startLocal, minutes);
+  const intervals = current.slots.map((s) => answerInterval(day, s, user.defaultSessionMinutes));
+  const found = intervals.findIndex((i) => i !== null && i.end > now);
+  const index = found === -1 ? current.slots.length - 1 : found;
+  const slot = current.slots[index]!;
+  const lastShift = Math.max(0, ...current.entries.map((e) => e.lastRelativeShiftAt ?? 0));
+  if (now - lastShift < DOUBLE_TAP_MS) {
+    return { day, slot: index, from: slot.startLocal!, to: slot.startLocal!, status: slot.status as "yes" | "maybe", ignored: true };
+  }
+  const target = addMinutesInGamingDay(slot.startLocal!, minutes);
   if (!target) throw new UserError("That's past the end of the evening.");
-  return moveStart(db, user, day, target, source, { lastRelativeShiftAt: now });
+  return moveStart(db, user, day, index, target, source, { lastRelativeShiftAt: now });
 }
+
+// ── Free now ─────────────────────────────────────────────────────────────────────────────
 
 export async function setFreeNow(db: Db, userId: string, until: number): Promise<void> {
   const values = { expiresAt: until, updatedAt: Date.now() };
@@ -279,16 +458,23 @@ export async function sharedGroupNames(db: Db, userId: string): Promise<string[]
     .from(schema.groupMemberships)
     .innerJoin(schema.groups, eq(schema.groups.id, schema.groupMemberships.groupId))
     .where(and(eq(schema.groupMemberships.userId, userId), eq(schema.groupMemberships.shareAvailability, true)));
-  return rows.map((r) => r.name).sort();
+  return [...new Set(rows.map((r) => r.name))].sort();
 }
+
+// ── Group week ───────────────────────────────────────────────────────────────────────────
+
+export type MemberSlot = { status: "yes" | "maybe"; startsAt: number; endsAt: number };
 
 export type GroupMemberDay = {
   userId: string;
   displayName: string;
-  /** "unknown" covers both unanswered and hidden, on purpose (architecture §4.2). */
+  /** The day as a whole. "unknown" covers both unanswered and hidden, on purpose (architecture §4.2). */
   status: Status | "unknown";
   /** Whether the answer came from the member or from their weekly default. */
   kind: "explicit" | "default" | null;
+  /** Yes/Maybe time slots, earliest first. */
+  slots: MemberSlot[];
+  /** Start and end of the first slot, for compact views. */
   startsAt: number | null;
   endsAt: number | null;
   updatedAt: number | null;
@@ -308,6 +494,8 @@ export type WeekView = {
   members: { userId: string; displayName: string; role: "admin" | "member" }[];
   days: GroupDay[];
   freeNow: FreeNowMember[];
+  /** Main characters of members who share with this group. */
+  characters: Map<string, MainCharacter>;
 };
 
 export type GroupWeek = WeekView & { membership: Membership };
@@ -373,7 +561,8 @@ async function loadWeek(db: Db, group: Group, days: LocalDate[]): Promise<WeekVi
     for (const r of rows) selectedGroups.set(r.entryId, [...(selectedGroups.get(r.entryId) ?? []), r.groupId]);
   }
 
-  const byKey = new Map(entries.map((e) => [`${e.userId}|${e.localDate}`, e]));
+  const byKey = new Map<string, Entry[]>();
+  for (const e of entries) byKey.set(`${e.userId}|${e.localDate}`, [...(byKey.get(`${e.userId}|${e.localDate}`) ?? []), e]);
   const defaults = await defaultsFor(db, sharingIds);
 
   const freeRows =
@@ -388,10 +577,13 @@ async function loadWeek(db: Db, group: Group, days: LocalDate[]): Promise<WeekVi
     .map((r) => ({ userId: r.userId, displayName: names.get(r.userId) ?? "?", until: r.until }))
     .sort((a, b) => a.displayName.localeCompare(b.displayName));
 
+  const characters = await mainCharacters(db, sharingIds);
+
   return {
     group,
     members: members.map(({ userId, displayName, role }) => ({ userId, displayName, role })),
     freeNow,
+    characters,
     days: days.map((day) => {
       const rows: GroupMemberDay[] = members.map((m) => {
         const hidden: GroupMemberDay = {
@@ -399,37 +591,52 @@ async function loadWeek(db: Db, group: Group, days: LocalDate[]): Promise<WeekVi
           displayName: m.displayName,
           status: "unknown",
           kind: null,
+          slots: [],
           startsAt: null,
           endsAt: null,
           updatedAt: null,
         };
         const membership = { groupId, shareAvailability: m.shareAvailability };
-        const entry = byKey.get(`${m.userId}|${day}`);
-        if (entry) {
-          // An explicit answer always wins over the default, even when it's hidden from this group.
-          const sharing =
-            entry.shareScope === "selected"
-              ? ({ shareScope: "selected", groupIds: selectedGroups.get(entry.id) ?? [] } as const)
-              : ({ shareScope: "all_shared_groups" } as const);
-          if (!visibleInGroup(groupId, membership, sharing)) return hidden;
+        const explicit = byKey.get(`${m.userId}|${day}`);
+        if (explicit) {
+          // Explicit answers always win over the default, even when hidden from this group.
+          const visible = explicit.filter((e) =>
+            visibleInGroup(
+              groupId,
+              membership,
+              e.shareScope === "selected"
+                ? { shareScope: "selected", groupIds: selectedGroups.get(e.id) ?? [] }
+                : { shareScope: "all_shared_groups" },
+            ),
+          );
+          if (visible.length === 0) return hidden;
+          const slots = visible
+            .filter((e) => e.status !== "no" && e.startsAt !== null && e.endsAt !== null)
+            .map((e) => ({ status: e.status as "yes" | "maybe", startsAt: e.startsAt!, endsAt: e.endsAt! }))
+            .sort((a, b) => a.startsAt - b.startsAt);
           return {
             ...hidden,
-            status: entry.status,
+            status: dayStatus(visible),
             kind: "explicit",
-            startsAt: entry.startsAt,
-            endsAt: entry.endsAt,
-            updatedAt: entry.updatedAt,
+            slots,
+            startsAt: slots[0]?.startsAt ?? null,
+            endsAt: slots[0]?.endsAt ?? null,
+            updatedAt: Math.max(...visible.map((e) => e.updatedAt)),
           };
         }
-        const fallback = resolveEffective(day, undefined, defaults.get(m.userId) ?? {});
+        const fallback = resolveEffective(day, [], defaults.get(m.userId) ?? {});
         if (fallback.kind === "unknown" || !visibleInGroup(groupId, membership, null)) return hidden;
-        const interval = answerInterval(day, fallback, m.defaultSessionMinutes);
+        const slots = fallback.slots.flatMap((s) => {
+          const interval = answerInterval(day, s, m.defaultSessionMinutes);
+          return interval ? [{ status: s.status as "yes" | "maybe", startsAt: interval.start, endsAt: interval.end }] : [];
+        });
         return {
           ...hidden,
           status: fallback.status,
           kind: "default",
-          startsAt: interval?.start ?? null,
-          endsAt: interval?.end ?? null,
+          slots,
+          startsAt: slots[0]?.startsAt ?? null,
+          endsAt: slots[0]?.endsAt ?? null,
         };
       });
 
@@ -437,9 +644,7 @@ async function loadWeek(db: Db, group: Group, days: LocalDate[]): Promise<WeekVi
       for (const r of rows) counts[r.status]++;
 
       const intervals: MemberInterval[] = rows.flatMap((r) =>
-        (r.status === "yes" || r.status === "maybe") && r.startsAt !== null && r.endsAt !== null
-          ? [{ memberId: r.userId, status: r.status, interval: { start: r.startsAt, end: r.endsAt } }]
-          : [],
+        r.slots.map((s) => ({ memberId: r.userId, status: s.status, interval: { start: s.startsAt, end: s.endsAt } })),
       );
       const best = bestStart(intervals, { minPlayers: group.minPlayers, minOverlapMinutes: group.minOverlapMinutes });
       return { day, members: rows, counts, best };

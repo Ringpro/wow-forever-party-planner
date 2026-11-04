@@ -1,0 +1,186 @@
+---
+import { WOW_CLASSES } from "@muster/db";
+import Layout from "../../layouts/Layout.astro";
+import { refreshBoardsLater } from "../../lib/server/background.ts";
+import {
+  CLASS_COLORS,
+  CLASS_NAMES,
+  MAX_LEVEL,
+  deleteCharacter,
+  listCharacters,
+  saveCharacter,
+} from "../../lib/server/characters.ts";
+import { getDb } from "../../lib/server/db.ts";
+import { UserError } from "../../lib/server/users.ts";
+
+const user = Astro.locals.user!;
+const db = getDb();
+let error: string | null = null;
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  const action = String(form.get("action") ?? "");
+  const id = String(form.get("id") ?? "") || undefined;
+  try {
+    if (action === "delete" && id) await deleteCharacter(db, user.id, id);
+    else {
+      const characters = await listCharacters(db, user.id);
+      const current = characters.find((c) => c.id === id);
+      if (action === "main" && current) {
+        await saveCharacter(db, user.id, { ...current, realm: current.realm ?? "", isMain: true });
+      } else {
+        await saveCharacter(db, user.id, {
+          id,
+          name: String(form.get("name") ?? ""),
+          realm: String(form.get("realm") ?? ""),
+          faction: String(form.get("faction") ?? ""),
+          class: String(form.get("class") ?? ""),
+          level: Number(form.get("level")),
+          isMain: form.get("isMain") === "on",
+        });
+      }
+    }
+    refreshBoardsLater(Astro.locals, { userId: user.id });
+    return Astro.redirect("/app/characters");
+  } catch (e) {
+    if (!(e instanceof UserError)) throw e;
+    error = e.message;
+  }
+}
+
+const characters = await listCharacters(db, user.id);
+const editing = characters.find((c) => c.id === Astro.url.searchParams.get("edit"));
+---
+
+<Layout title="Characters" active="characters">
+  <div class="page-head">
+    <h1>Your characters</h1>
+    <p class="muted small">
+      Your main shows next to your name in your groups. Update its level here or with <code>/level</code> in Discord.
+    </p>
+  </div>
+
+  <div id="flash">{error && <p class="error" role="alert">{error}</p>}</div>
+
+  {characters.length > 0 && (
+    <div class="card">
+      <ul class="plain">
+        {characters.map((c) => (
+          <li class="list-row character">
+            <span class="who">
+              <span class="class-dot" style={`--c:${CLASS_COLORS[c.class]}`} aria-hidden="true"></span>
+              <span>
+                <strong>{c.name}</strong>
+                {c.isMain && <span class="chip yes">Main</span>}
+                <span class="muted small block">
+                  Level {c.level} {c.faction === "alliance" ? "Alliance" : "Horde"} {CLASS_NAMES[c.class]}
+                  {c.realm && ` · ${c.realm}`}
+                </span>
+              </span>
+            </span>
+            <span class="actions">
+              {!c.isMain && (
+                <form method="post">
+                  <input type="hidden" name="action" value="main" />
+                  <input type="hidden" name="id" value={c.id} />
+                  <button class="link small">Make main</button>
+                </form>
+              )}
+              <a class="small" href={`?edit=${c.id}#form`}>Edit</a>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )}
+
+  <h2 id="form">{editing ? `Edit ${editing.name}` : characters.length === 0 ? "Add your first character" : "Add a character"}</h2>
+  <form method="post" class="card character-form">
+    {editing && <input type="hidden" name="id" value={editing.id} />}
+    <label>
+      Name
+      <input name="name" required minlength="2" maxlength="24" value={editing?.name ?? ""} placeholder="Thrallson" />
+    </label>
+    <label>
+      Realm <span class="muted small">(optional)</span>
+      <input name="realm" maxlength="40" value={editing?.realm ?? ""} />
+    </label>
+    <fieldset class="faction">
+      <legend>Faction</legend>
+      <label class="check"><input type="radio" name="faction" value="alliance" required checked={editing?.faction === "alliance"} /> Alliance</label>
+      <label class="check"><input type="radio" name="faction" value="horde" checked={editing?.faction === "horde"} /> Horde</label>
+    </fieldset>
+    <label>
+      Class
+      <select name="class" required>
+        {!editing && <option value="">Pick a class</option>}
+        {WOW_CLASSES.map((cls) => <option value={cls} selected={editing?.class === cls}>{CLASS_NAMES[cls]}</option>)}
+      </select>
+    </label>
+    <label>
+      Level
+      <input name="level" type="number" min="1" max={MAX_LEVEL} required value={editing?.level ?? 1} />
+    </label>
+    <label class="check">
+      <input type="checkbox" name="isMain" checked={editing ? editing.isMain : characters.length === 0} /> My main character
+    </label>
+    <div class="form-buttons">
+      <button class="button" type="submit">{editing ? "Save" : "Add character"}</button>
+      {editing && <a class="button secondary" href="/app/characters">Cancel</a>}
+    </div>
+  </form>
+  {editing && (
+    <form method="post">
+      <input type="hidden" name="action" value="delete" />
+      <input type="hidden" name="id" value={editing.id} />
+      <button class="button danger" type="submit">Delete {editing.name}</button>
+    </form>
+  )}
+</Layout>
+
+<style>
+  .who {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .block {
+    display: block;
+  }
+  .who .chip {
+    margin-left: 8px;
+  }
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .actions form {
+    margin: 0;
+  }
+  .character-form {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+  }
+  .faction {
+    border: 0;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .faction legend {
+    font-weight: 500;
+    padding: 0;
+    margin-bottom: 6px;
+    width: 100%;
+  }
+  .form-buttons {
+    display: flex;
+    gap: 8px;
+    grid-column: 1 / -1;
+  }
+</style>

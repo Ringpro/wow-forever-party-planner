@@ -63,6 +63,14 @@ export const COMMANDS = [
     ],
   },
   {
+    name: "level",
+    description: "Set the level of your main character",
+    ...EVERYWHERE,
+    options: [
+      { type: OptionType.Integer, name: "level", description: "Your new level", required: true, min_value: 1, max_value: 60 },
+    ],
+  },
+  {
     name: "board",
     description: "Your group's availability board in this channel",
     integration_types: [0],

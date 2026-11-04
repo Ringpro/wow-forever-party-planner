@@ -4,7 +4,20 @@ import { STATUS_ICON, dayLabel, timeIn } from "../../lib/format.ts";
 import { groupWeek, planningWeeks } from "../../lib/server/availability.ts";
 import { refreshBoardsLater } from "../../lib/server/background.ts";
 import { getDb } from "../../lib/server/db.ts";
-import { getInviteToken, leaveGroup, makeAdmin, resetInvite, setSharing } from "../../lib/server/groups.ts";
+import { CLASS_COLORS, describeCharacter } from "../../lib/server/characters.ts";
+import { guildRoles } from "../../lib/server/discord-sync.ts";
+import {
+  createSquad,
+  deleteSquad,
+  getInviteToken,
+  groupKind,
+  leaveGroup,
+  listSquads,
+  makeAdmin,
+  resetInvite,
+  setSharing,
+  updateGroupSettings,
+} from "../../lib/server/groups.ts";
 import { UserError } from "../../lib/server/users.ts";
 
 const user = Astro.locals.user!;
@@ -20,6 +33,21 @@ if (Astro.request.method === "POST") {
     if (action === "share") await setSharing(db, user.id, groupId, form.get("share") === "on");
     else if (action === "reset_invite") await resetInvite(db, user.id, groupId);
     else if (action === "make_admin") await makeAdmin(db, user.id, groupId, String(form.get("memberId") ?? ""));
+    else if (action === "settings") {
+      await updateGroupSettings(db, user.id, groupId, {
+        timezone: String(form.get("timezone") ?? ""),
+        minPlayers: Number(form.get("minPlayers")),
+      });
+    } else if (action === "create_squad") {
+      const squadId = await createSquad(db, user.id, groupId, {
+        name: String(form.get("name") ?? ""),
+        roleId: String(form.get("roleId") ?? ""),
+      });
+      return Astro.redirect(`/groups/${squadId}`);
+    } else if (action === "delete_squad") {
+      const parentId = await deleteSquad(db, user.id, groupId);
+      return Astro.redirect(`/groups/${parentId}`);
+    }
     else if (action === "leave") {
       await leaveGroup(db, user.id, groupId);
       refreshBoardsLater(Astro.locals, { groupIds: [groupId] });
@@ -40,7 +68,16 @@ const week = await groupWeek(db, user, groupId, selected.days);
 if (!week) return new Response("Not found", { status: 404 });
 const { group, membership } = week;
 const isAdmin = membership.role === "admin";
-const inviteUrl = isAdmin ? `${Astro.url.origin}/join/${await getInviteToken(db, user.id, groupId)}` : null;
+const kind = groupKind(group);
+const inviteUrl =
+  isAdmin && kind === "private" ? `${Astro.url.origin}/join/${await getInviteToken(db, user.id, groupId)}` : null;
+const squads = kind === "server" ? await listSquads(db, group.id) : [];
+let roles: { id: string; name: string }[] = [];
+if (kind === "server" && isAdmin && group.discordGuildId) {
+  roles = await guildRoles(group.discordGuildId).catch(() => []);
+}
+const roleName = new Map(roles.map((r) => [r.id, r.name]));
+const zones = Intl.supportedValuesOf("timeZone");
 const today = weeks[0]!.days[0]!;
 const dow = (day: string) => dayLabel(day).slice(0, 3);
 const dom = (day: string) => String(Number(day.slice(8)));
@@ -51,11 +88,17 @@ const span = (startsAt: number | null, endsAt: number | null) =>
 <Layout title={group.name}>
   <div class="page-head">
     <p class="small"><a href="/app">← Schedule</a></p>
-    <h1>{group.name}</h1>
-    <p class="muted small">
-      {week.members.length} {week.members.length === 1 ? "member" : "members"} · {group.minPlayers} needed to play ·
-      times in {tz.replaceAll("_", " ")}
-    </p>
+    <div class="group-title">
+      {group.iconUrl ? <img class="server-icon" src={group.iconUrl} width="40" height="40" alt="" /> : null}
+      <div>
+        <h1>{group.name}</h1>
+        <p class="muted small">
+          {kind === "server" ? "Discord server" : kind === "squad" ? "Squad" : "Private group"} ·
+          {" "}{week.members.length} {week.members.length === 1 ? "member" : "members"} · {group.minPlayers} needed to play ·
+          times in {tz.replaceAll("_", " ")}
+        </p>
+      </div>
+    </div>
   </div>
 
   <div id="flash">{error && <p class="error" role="alert">{error}</p>}</div>
@@ -110,8 +153,13 @@ const span = (startsAt: number | null, endsAt: number | null) =>
                     class={`chip ${m.status}${m.kind === "default" ? " default" : ""}`}
                     title={m.kind === "default" ? "Weekly default" : undefined}
                   >
+                    {week.characters.get(m.userId) && (
+                      <span class="class-dot" style={`--c:${CLASS_COLORS[week.characters.get(m.userId)!.class]}`} aria-hidden="true"></span>
+                    )}
                     {STATUS_ICON[m.status]} {m.displayName}
-                    {m.status !== "no" && m.startsAt !== null && <span class="t">{span(m.startsAt, m.endsAt)}</span>}
+                    {m.status !== "no" && m.slots.length > 0 && (
+                      <span class="t">{m.slots.map((s) => span(s.startsAt, s.endsAt)).join(", ")}</span>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -137,6 +185,58 @@ const span = (startsAt: number | null, endsAt: number | null) =>
       <noscript><button class="button secondary" type="submit">Save</button></noscript>
     </form>
 
+    {kind !== "private" && (
+      <p class="muted small" style="margin:0">
+        {kind === "server"
+          ? "Everyone in this Discord server who uses Muster is in this group. Admins are the people who can manage the server."
+          : `Everyone in the server with the ${roleName.get(group.discordRoleId ?? "") ?? "squad's"} role is in this squad. They show up after their next login or Discord command.`}
+      </p>
+    )}
+
+    {isAdmin && (
+      <form method="post" class="settings-form">
+        <input type="hidden" name="action" value="settings" />
+        <label>
+          Time zone <span class="muted small">(for the Discord board)</span>
+          <select name="timezone">
+            {zones.map((z) => <option value={z} selected={z === group.timezone}>{z.replaceAll("_", " ")}</option>)}
+          </select>
+        </label>
+        <label>
+          Players needed
+          <input name="minPlayers" type="number" min="1" max="40" value={group.minPlayers} />
+        </label>
+        <button class="button secondary" type="submit">Save</button>
+      </form>
+    )}
+
+    {kind === "server" && (
+      <div>
+        <h3>Squads</h3>
+        <p class="muted small">Smaller groups inside this server, like a raid team. Each follows a Discord role.</p>
+        {squads.length > 0 && (
+          <ul class="plain">
+            {squads.map((s) => (
+              <li class="list-row">
+                <a href={`/groups/${s.id}`}>{s.name}</a>
+                <span class="muted small">@{roleName.get(s.roleId ?? "") ?? "role"}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {isAdmin && roles.length > 0 && (
+          <form method="post" class="squad-form">
+            <input type="hidden" name="action" value="create_squad" />
+            <input name="name" required maxlength="60" placeholder="Raid team" aria-label="Squad name" />
+            <select name="roleId" aria-label="Discord role" required>
+              {roles.map((r) => <option value={r.id}>@{r.name}</option>)}
+            </select>
+            <button class="button secondary" type="submit">Add squad</button>
+          </form>
+        )}
+      </div>
+    )}
+
     {inviteUrl && (
       <div>
         <h3>Invite link</h3>
@@ -157,10 +257,22 @@ const span = (startsAt: number | null, endsAt: number | null) =>
       <ul class="plain">
         {week.members.map((m) => (
           <li class="list-row">
-            <span>{m.displayName}</span>
+            <span class="member">
+              {week.characters.get(m.userId) ? (
+                <>
+                  <span class="class-dot" style={`--c:${CLASS_COLORS[week.characters.get(m.userId)!.class]}`} aria-hidden="true"></span>
+                  <span>
+                    {m.displayName}
+                    <span class="muted small"> · {week.characters.get(m.userId)!.name}, {describeCharacter(week.characters.get(m.userId)!)}</span>
+                  </span>
+                </>
+              ) : (
+                <span>{m.displayName}</span>
+              )}
+            </span>
             {m.role === "admin" ? (
               <span class="muted small">Admin</span>
-            ) : isAdmin ? (
+            ) : isAdmin && kind === "private" ? (
               <form method="post">
                 <input type="hidden" name="action" value="make_admin" />
                 <input type="hidden" name="memberId" value={m.userId} />
@@ -174,10 +286,18 @@ const span = (startsAt: number | null, endsAt: number | null) =>
       </ul>
     </div>
 
-    <form method="post">
-      <input type="hidden" name="action" value="leave" />
-      <button class="button danger" type="submit">Leave group</button>
-    </form>
+    {membership.source === "invite" && (
+      <form method="post">
+        <input type="hidden" name="action" value="leave" />
+        <button class="button danger" type="submit">Leave group</button>
+      </form>
+    )}
+    {kind === "squad" && isAdmin && (
+      <form method="post">
+        <input type="hidden" name="action" value="delete_squad" />
+        <button class="button danger" type="submit">Delete squad</button>
+      </form>
+    )}
   </div>
 </Layout>
 
@@ -277,5 +397,33 @@ const span = (startsAt: number | null, endsAt: number | null) =>
   }
   .setting-row {
     margin: 0;
+  }
+  .member {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .who .class-dot {
+    width: 8px;
+    height: 8px;
+  }
+  .group-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .server-icon {
+    border-radius: 12px;
+    flex: none;
+  }
+  .settings-form,
+  .squad-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px;
+  }
+  .squad-form {
+    margin-top: 12px;
   }
 </style>

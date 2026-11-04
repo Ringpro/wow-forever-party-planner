@@ -2,10 +2,18 @@
 import DayRow from "../components/DayRow.astro";
 import Layout from "../layouts/Layout.astro";
 import { dayLabel } from "../lib/format.ts";
-import { clearAvailability, copyWeekForward, myDays, planningWeeks, setAvailability } from "../lib/server/availability.ts";
+import {
+  addSlot,
+  clearAvailability,
+  copyWeekForward,
+  myDays,
+  planningWeeks,
+  removeSlot,
+  setSlot,
+} from "../lib/server/availability.ts";
 import { refreshBoardsLater } from "../lib/server/background.ts";
 import { getDb } from "../lib/server/db.ts";
-import { listMyGroups } from "../lib/server/groups.ts";
+import { listMyGroups, setSharing } from "../lib/server/groups.ts";
 import { UserError } from "../lib/server/users.ts";
 import { addDays } from "@muster/domain";
 
@@ -26,23 +34,28 @@ if (Astro.request.method === "POST") {
   const day = String(form.get("day") ?? "");
   const status = String(form.get("status") ?? "");
   try {
+    const shareGroupId = String(form.get("share_group") ?? "");
+    if (shareGroupId) {
+      await setSharing(db, user.id, shareGroupId, form.get("share") === "yes");
+      refreshBoardsLater(Astro.locals, { groupIds: [shareGroupId] });
+      return Astro.redirect("/app");
+    }
     if (status === "copy_week") {
       const count = await copyWeekForward(db, user);
       refreshBoardsLater(Astro.locals, { userId: user.id });
       return Astro.redirect(`/app?copied=${count}#week-next`);
     }
-    if (status === "clear") {
-      await clearAvailability(db, user.id, day);
-    } else {
-      await setAvailability(
+    const slot = Number(form.get("slot") ?? 0);
+    if (status === "clear") await clearAvailability(db, user.id, day);
+    else if (status === "add_slot") await addSlot(db, user, day, "web");
+    else if (status === "remove_slot") await removeSlot(db, user, day, slot, "web");
+    else {
+      await setSlot(
         db,
         user,
-        {
-          day,
-          status,
-          startLocal: String(form.get("start") ?? "") || null,
-          endLocal: String(form.get("end") ?? "") || null,
-        },
+        day,
+        slot,
+        { status, startLocal: String(form.get("start") ?? "") || null, endLocal: String(form.get("end") ?? "") || null },
         "web",
       );
     }
@@ -58,6 +71,8 @@ const weeks = planningWeeks(tz);
 const today = weeks[0]!.days[0]!;
 const answers = await myDays(db, user.id, weeks.flatMap((w) => w.days));
 const groups = await listMyGroups(db, user.id);
+// Servers found at login start unshared; ask once instead of sharing silently.
+const undecided = groups.filter((g) => g.kind === "server" && g.shareDecidedAt === null);
 const range = (monday: string) => `${dayLabel(monday).slice(4)} – ${dayLabel(addDays(monday, 6)).slice(4)}`;
 const dow = (day: string) => dayLabel(day).slice(0, 3);
 const dom = (day: string) => String(Number(day.slice(8)));
@@ -76,6 +91,21 @@ const dom = (day: string) => String(Number(day.slice(8)));
     {error && <p class="error" role="alert">{error}</p>}
     {notice && <p class="notice">{notice}</p>}
   </div>
+
+  {undecided.map((g) => (
+    <form method="post" class="card share-ask">
+      <input type="hidden" name="share_group" value={g.id} />
+      {g.iconUrl && <img class="server-icon" src={g.iconUrl} width="36" height="36" alt="" />}
+      <div class="share-ask-text">
+        <strong>Share your schedule with {g.name}?</strong>
+        <span class="muted small">You're in this Discord server, and it uses Muster.</span>
+      </div>
+      <div class="share-ask-buttons">
+        <button class="button" name="share" value="yes">Share</button>
+        <button class="button secondary" name="share" value="no">Not now</button>
+      </div>
+    </form>
+  ))}
 
   {weeks.map((week) => (
     <section id={`week-${week.key}`}>
@@ -101,9 +131,7 @@ const dom = (day: string) => String(Number(day.slice(8)));
               hidden={{ day }}
               status={a.kind === "unknown" ? "unknown" : a.status}
               kind={a.kind}
-              start={a.kind === "unknown" ? null : a.startLocal}
-              end={a.kind === "unknown" ? null : a.endLocal}
-              canClear={a.kind === "explicit"}
+              slots={a.kind === "unknown" ? [] : a.slots.map((s) => ({ status: s.status as "yes" | "maybe", start: s.startLocal, end: s.endLocal }))}
               note={a.kind === "default" ? "From your weekly default" : undefined}
             />
           );
@@ -114,28 +142,81 @@ const dom = (day: string) => String(Number(day.slice(8)));
 
   <section>
     <div class="week-head">
-      <h2>Your groups</h2>
-      <a class="small" href="/groups/new">New group</a>
+      <h2>Your servers and groups</h2>
     </div>
     <div class="card">
       {groups.length === 0 ? (
         <p class="muted" style="margin:0">
-          You're not in a group yet. <a href="/groups/new">Create one</a>, or ask a friend for an invite link.
+          Muster finds your Discord servers when you log in. <a href="/get">Add Muster to your server</a>, then log in
+          again.
         </p>
       ) : (
         <ul class="plain">
           {groups.map((g) => (
-            <li class="list-row">
-              <a href={`/groups/${g.id}`}>{g.name}</a>
-              <span class="muted small">{g.role === "admin" ? "Admin" : "Member"}</span>
+            <li class={`list-row${g.kind === "squad" ? " squad" : ""}`}>
+              <span class="group-name">
+                {g.kind === "server" &&
+                  (g.iconUrl ? (
+                    <img class="server-icon" src={g.iconUrl} width="24" height="24" alt="" />
+                  ) : (
+                    <span class="server-icon placeholder" aria-hidden="true">{g.name.slice(0, 1)}</span>
+                  ))}
+                <a href={`/groups/${g.id}`}>{g.name}</a>
+              </span>
+              <span class="muted small">
+                {g.kind === "squad" ? "Squad" : g.kind === "private" ? "Private group" : g.role === "admin" ? "Admin" : ""}
+                {!g.shareAvailability && " · not sharing"}
+              </span>
             </li>
           ))}
         </ul>
       )}
     </div>
+    <p class="muted small">
+      Not on Discord together? <a href="/groups/new">Create a private group</a> with an invite link.
+    </p>
   </section>
 </Layout>
 
 <script>
   import "../scripts/rows.ts";
 </script>
+
+<style>
+  .share-ask {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+  }
+  .share-ask-text {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 200px;
+  }
+  .share-ask-buttons {
+    display: flex;
+    gap: 8px;
+  }
+  .server-icon {
+    border-radius: 8px;
+    flex: none;
+  }
+  .server-icon.placeholder {
+    display: inline-grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    background: var(--surface-3);
+    font-size: 0.8rem;
+    font-weight: 700;
+  }
+  .group-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .list-row.squad .group-name {
+    padding-left: 34px;
+  }
+</style>

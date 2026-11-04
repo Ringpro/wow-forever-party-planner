@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { answerInterval, resolveEffective, type AvailabilityAnswer } from "./availability.ts";
+import { answerInterval, dayStatus, resolveEffective, type AvailabilityAnswer } from "./availability.ts";
 import { HOUR } from "./time.ts";
 
 const CPH = "Europe/Copenhagen";
@@ -11,18 +11,36 @@ const answer = (status: AvailabilityAnswer["status"], startLocal: string | null,
 });
 
 describe("resolveEffective", () => {
-  const defaults = { 5: answer("yes", "21:00") } as const;
+  const defaults = { 5: [answer("yes", "21:00")] };
 
   it("prefers the explicit answer", () => {
-    expect(resolveEffective("2026-10-23", answer("no", null), defaults)).toMatchObject({ kind: "explicit", status: "no" });
+    expect(resolveEffective("2026-10-23", [answer("no", null)], defaults)).toEqual({ kind: "explicit", status: "no", slots: [] });
   });
 
   it("falls back to the weekday default", () => {
-    expect(resolveEffective("2026-10-30", undefined, defaults)).toMatchObject({ kind: "default", startLocal: "21:00" });
+    expect(resolveEffective("2026-10-30", [], defaults)).toMatchObject({
+      kind: "default",
+      status: "yes",
+      slots: [{ startLocal: "21:00" }],
+    });
   });
 
   it("is unknown without either", () => {
-    expect(resolveEffective("2026-10-24", undefined, defaults)).toEqual({ kind: "unknown" });
+    expect(resolveEffective("2026-10-24", [], defaults)).toEqual({ kind: "unknown" });
+  });
+
+  it("keeps several slots in time order and sums up the day", () => {
+    const day = resolveEffective("2026-10-24", [answer("maybe", "00:30"), answer("maybe", "20:00"), answer("yes", "12:00")], {});
+    expect(day).toMatchObject({ kind: "explicit", status: "yes" });
+    expect(day.kind !== "unknown" && day.slots.map((s) => s.startLocal)).toEqual(["12:00", "20:00", "00:30"]);
+  });
+});
+
+describe("dayStatus", () => {
+  it("ranks yes over maybe over no", () => {
+    expect(dayStatus([{ status: "maybe" }, { status: "yes" }])).toBe("yes");
+    expect(dayStatus([{ status: "maybe" }])).toBe("maybe");
+    expect(dayStatus([])).toBe("no");
   });
 });
 

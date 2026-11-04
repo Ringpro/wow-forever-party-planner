@@ -81,12 +81,15 @@ describe("planner", () => {
   it("highlights the current answer and offers Clear", () => {
     const m = plannerMessage({
       ...base,
-      entries: new Map([["2026-10-23", { status: "maybe" as const, startLocal: "20:30", endLocal: null }]]),
+      entries: new Map([
+        ["2026-10-23", { status: "maybe" as const, slots: [{ status: "maybe" as const, startLocal: "20:30", endLocal: null }] }],
+      ]),
     });
     const maybe = m.components![2]!.components.find((c) => "custom_id" in c && c.custom_id.includes(":maybe:"));
     expect(maybe && "style" in maybe ? maybe.style : null).toBe(1);
     expect(ids(m)).toContain("pl:clear:2026-10-23");
-    expect(m.content).toContain("~ Maybe from 20:30");
+    expect(m.content).toContain("~ 20:30");
+    expect(ids(m)).toContain("pl:add:2026-10-23:2100");
   });
 
   it("stays within Discord's component limits", () => {
@@ -103,13 +106,13 @@ describe("planner", () => {
 
 describe("delay", () => {
   it("offers +30 more and an absolute undo", () => {
-    const m = delayMessage({ day: "2026-10-23", from: "20:30", to: "21:00", ignored: false, sharedWith: [] });
+    const m = delayMessage({ day: "2026-10-23", slot: 1, from: "20:30", to: "21:00", ignored: false, sharedWith: [] });
     expect(m.content).toContain("**21:00** (was 20:30)");
-    expect(ids(m)).toEqual(["dl:to:2026-10-23:2130:2100", "dl:to:2026-10-23:2030:2030"]);
+    expect(ids(m)).toEqual(["dl:to:2026-10-23:1:2130:2100", "dl:to:2026-10-23:1:2030:2030"]);
   });
 
   it("says so when a double tap was ignored", () => {
-    const m = delayMessage({ day: "2026-10-23", from: "21:00", to: "21:00", ignored: true, sharedWith: [] });
+    const m = delayMessage({ day: "2026-10-23", slot: 0, from: "21:00", to: "21:00", ignored: true, sharedWith: [] });
     expect(m.content).toContain("moved it a moment ago");
   });
 });

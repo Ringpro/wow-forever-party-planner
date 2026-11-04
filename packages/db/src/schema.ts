@@ -1,7 +1,15 @@
 // First-pass schema for the scheduling MVP. Rules it follows: docs/architecture.md §4.
 // Timestamps are UTC epoch milliseconds. Local dates are 'YYYY-MM-DD', wall times 'HH:MM'.
 import { sql } from "drizzle-orm";
-import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+  uniqueIndex,
+  type AnySQLiteColumn,
+} from "drizzle-orm/sqlite-core";
 
 const now = sql`(unixepoch('subsec') * 1000)`;
 const createdAt = () => integer("created_at", { mode: "number" }).notNull().default(now);
@@ -38,15 +46,30 @@ export const authSessions = sqliteTable("auth_sessions", {
   createdAt: createdAt(),
 });
 
-export const groups = sqliteTable("groups", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  timezone: text("timezone").notNull(),
-  minPlayers: integer("min_players").notNull().default(3),
-  minOverlapMinutes: integer("min_overlap_minutes").notNull().default(60),
-  createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
-  createdAt: createdAt(),
-});
+// Three kinds of group (architecture §4.6):
+//   Discord server: discordGuildId set, no parent. Members are whoever in the server uses Muster.
+//   Squad: inside a server group (parentGroupId), members are the server members with discordRoleId.
+//   Private group: neither set; members join with an invite link.
+export const groups = sqliteTable(
+  "groups",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    timezone: text("timezone").notNull(),
+    minPlayers: integer("min_players").notNull().default(3),
+    minOverlapMinutes: integer("min_overlap_minutes").notNull().default(60),
+    discordGuildId: text("discord_guild_id"),
+    discordRoleId: text("discord_role_id"),
+    parentGroupId: text("parent_group_id").references((): AnySQLiteColumn => groups.id, { onDelete: "cascade" }),
+    iconUrl: text("icon_url"),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("groups_server_guild").on(t.discordGuildId).where(sql`parent_group_id is null`),
+    uniqueIndex("groups_squad_role").on(t.parentGroupId, t.discordRoleId),
+  ],
+);
 
 export const groupMemberships = sqliteTable(
   "group_memberships",
@@ -55,6 +78,11 @@ export const groupMemberships = sqliteTable(
     userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     role: text("role", { enum: ["admin", "member"] }).notNull().default("member"),
     shareAvailability: integer("share_availability", { mode: "boolean" }).notNull().default(true),
+    // "discord" memberships are kept in sync with Discord; "invite" ones are only changed by people.
+    source: text("source", { enum: ["invite", "discord"] }).notNull().default("invite"),
+    // Set once the user has chosen whether to share with this group. Servers found at login start
+    // unshared and undecided, so the website can ask instead of sharing silently.
+    shareDecidedAt: integer("share_decided_at"),
     joinedAt: integer("joined_at").notNull().default(now),
   },
   (t) => [primaryKey({ columns: [t.groupId, t.userId] }), index("group_memberships_user").on(t.userId)],
@@ -71,13 +99,15 @@ export const groupInvites = sqliteTable("group_invites", {
   createdAt: createdAt(),
 });
 
-// One row per user per gaming day. Groups see it through sharing rules, never own it (§4.2).
+// One row per time slot per user per gaming day ("no" is a single row in slot 0).
+// Groups see it through sharing rules, never own it (§4.2).
 export const availabilityEntries = sqliteTable(
   "availability_entries",
   {
     id: text("id").primaryKey(),
     userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     localDate: text("local_date").notNull(),
+    slot: integer("slot").notNull().default(0),
     status: text("status", { enum: ["yes", "maybe", "no"] }).notNull(),
     startLocal: text("start_local"),
     endLocal: text("end_local"),
@@ -91,7 +121,7 @@ export const availabilityEntries = sqliteTable(
     lastRelativeShiftAt: integer("last_relative_shift_at"),
     updatedAt: updatedAt(),
   },
-  (t) => [uniqueIndex("availability_entries_user_date").on(t.userId, t.localDate)],
+  (t) => [uniqueIndex("availability_entries_user_date_slot").on(t.userId, t.localDate, t.slot)],
 );
 
 // Only used when share_scope = 'selected'.
@@ -109,13 +139,44 @@ export const weeklyDefaults = sqliteTable(
   {
     userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     weekday: integer("weekday").notNull(), // ISO: 1 = Monday … 7 = Sunday
+    slot: integer("slot").notNull().default(0),
     status: text("status", { enum: ["yes", "maybe", "no"] }).notNull(),
     startLocal: text("start_local"),
     endLocal: text("end_local"),
     tz: text("tz").notNull(),
     updatedAt: updatedAt(),
   },
-  (t) => [primaryKey({ columns: [t.userId, t.weekday] })],
+  (t) => [primaryKey({ columns: [t.userId, t.weekday, t.slot] })],
+);
+
+export const WOW_CLASSES = [
+  "warrior",
+  "paladin",
+  "hunter",
+  "rogue",
+  "priest",
+  "shaman",
+  "mage",
+  "warlock",
+  "druid",
+] as const;
+
+export const characters = sqliteTable(
+  "characters",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    realm: text("realm"),
+    faction: text("faction", { enum: ["alliance", "horde"] }).notNull(),
+    class: text("class", { enum: WOW_CLASSES }).notNull(),
+    level: integer("level").notNull().default(1),
+    isMain: integer("is_main", { mode: "boolean" }).notNull().default(false),
+    source: text("source", { enum: ["web", "discord", "addon"] }).notNull().default("web"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("characters_user").on(t.userId)],
 );
 
 export const freeNow = sqliteTable("free_now", {

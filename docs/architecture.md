@@ -100,8 +100,25 @@ Hidden and unanswered both show as *unknown* to others. That's deliberate: nobod
 ### 4.4 Provenance on everything that changes
 Every availability change, and later every character/progress record, stores `source` (`web`, `discord`, later `manual`, `addon`, `api`) and an update time. An `availability_events` audit table will keep the history.
 
-### 4.5 Game version is a first-class field (Phase 2)
-Characters carry `game_version`/`ruleset`, `realm` and `faction`. Matching never compares characters across versions. Values come from a lookup table so we can add the "WoW Forever" ruleset once it's confirmed.
+### 4.5 Characters
+Each user can add characters: name, optional realm, Alliance/Horde, class (the nine WoW Forever classes) and level, with one marked as their main. Groups see the main next to the player's name, only while the player shares with that group. Levels are typed in on the website or with `/level` in Discord (`source` records which). Everything is WoW Forever for now, so there's no game-version field yet; add one before supporting other versions.
+
+### 4.6 Groups: Discord servers, squads and private groups
+Groups are **Discord-server-first** (decided 2026-11-04):
+
+| Kind | How you're in it | Admins |
+| --- | --- | --- |
+| **Discord server** (`discord_guild_id`, no parent) | Being in the server and using Muster: found at website login (OAuth `guilds` scope, intersected with the servers the bot is in), or on any Discord interaction in that server | People who can manage the server (Manage Server, Administrator, or owner) |
+| **Squad** (`parent_group_id` + `discord_role_id`) | Being in the server group and having the Discord role (role IDs come with every interaction; at login they're read with the bot token) | The server's admins |
+| **Private group** (neither) | Invite link | Creator and anyone they promote |
+
+- Memberships made from Discord have `source = discord` and are kept in sync: leaving a server or losing a role removes them at the next login or interaction. Invite memberships are never touched by the sync.
+- **Sharing stays opt-in per server.** Servers found at login start unshared and undecided (`share_decided_at` is null), and the website asks. Using Muster inside a server counts as choosing to share there. A server's sharing switch also covers its squads.
+- Discord can't tell us when someone leaves a server without a gateway connection, so removal happens at their next login. Squad membership fills in as people log in or use a command; listing everyone with a role would need the privileged member intent.
+- We never store a user's full server list, only memberships for servers that have the bot.
+
+### 4.7 Several time slots per day
+A day is either **No** or up to four **Yes/Maybe slots** (e.g. 12:00–15:00 Maybe and 20:30–late Yes). Rows are `(user, day, slot)`; weekly defaults work the same way per weekday. The day as a whole is Yes if any slot is Yes, else Maybe. Best start time looks at every slot. "+30 min" moves the slot you're in, or the next one coming up. Changing one slot of a day that came from the weekly default copies the default's slots first.
 
 ## 5. Trust boundaries and authorization
 

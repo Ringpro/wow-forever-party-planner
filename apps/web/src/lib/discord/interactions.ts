@@ -9,14 +9,16 @@ import {
   clearFreeNow,
   groupWeek,
   moveStart,
+  addSlot,
   myDays,
-  myEntries,
   setAvailability,
   setFreeNow,
   sharedGroupNames,
   shiftToday,
   planningDays,
 } from "../server/availability.ts";
+import { setMainLevel } from "../server/characters.ts";
+import { syncFromInteraction } from "../server/discord-sync.ts";
 import { boardForChannel, refreshBoardsFor, removeBoard, setupBoard } from "../server/boards.ts";
 import { getGroupAsMember, listMyGroups } from "../server/groups.ts";
 import type { SessionUser } from "../server/session.ts";
@@ -66,6 +68,12 @@ export async function handleInteraction(
     username: discordUser.username,
     displayName: discordUser.global_name ?? discordUser.username,
   });
+  try {
+    const known = await getUser(ctx.db, userId);
+    await syncFromInteraction(ctx.db, userId, interaction, known?.timezone ?? null);
+  } catch (e) {
+    console.log(JSON.stringify({ event: "interaction_sync_failed", error: String(e) }));
+  }
   const user = await getUser(ctx.db, userId);
   if (!user) return null;
 
@@ -139,15 +147,23 @@ async function pickTimezone(ctx: InteractionContext, user: SessionUser, interact
 const setDay: Handler = async ({ ctx, actor, parts }) => {
   const [, , day = "", status = "", time] = parts;
   const start = fromHhmm(time);
-  const existing = (await myEntries(ctx.db, actor.id, [day])).get(day);
+  const existing = (await myDays(ctx.db, actor.id, [day])).get(day);
+  const firstEnd = existing && existing.kind !== "unknown" ? existing.slots[0]?.endLocal : null;
   // Discord has no end-time picker; keep the website's end time if it still fits.
   const endLocal =
-    existing?.endLocal && start && minutesIntoGamingDay(existing.endLocal) > minutesIntoGamingDay(start)
-      ? existing.endLocal
-      : null;
+    firstEnd && start && minutesIntoGamingDay(firstEnd) > minutesIntoGamingDay(start) ? firstEnd : null;
   await setAvailability(ctx.db, actor, { day, status, startLocal: start, endLocal }, "discord");
   refresh(ctx, actor.id);
   return update(await planner(ctx.db, actor, day, start, `Saved **${dayLabel(day)}**.`));
+};
+
+const addTime: Handler = async ({ ctx, actor, parts }) => {
+  const [, , day = "", time] = parts;
+  const start = fromHhmm(time);
+  if (!start) throw new UserError("Pick a start time first.");
+  await addSlot(ctx.db, actor, day, "discord", start);
+  refresh(ctx, actor.id);
+  return update(await planner(ctx.db, actor, day, start, `Added ${start} to **${dayLabel(day)}**.`));
 };
 
 const clearDay: Handler = async ({ ctx, actor, parts }) => {
@@ -207,10 +223,15 @@ const boardCommand: Handler = async ({ ctx, interaction, actor }) => {
     return reply({ content: `Removed the **${name}** board from this channel.` });
   }
 
-  const adminGroups = (await listMyGroups(ctx.db, actor.id)).filter((g) => g.role === "admin");
+  // This server and its squads first, then private groups; only ones the actor can manage.
+  const mine = (await listMyGroups(ctx.db, actor.id)).filter((g) => g.role === "admin");
+  const adminGroups = [
+    ...mine.filter((g) => g.discordGuildId === interaction.guild_id),
+    ...mine.filter((g) => g.kind === "private"),
+  ];
   if (adminGroups.length === 0) {
     return reply({
-      content: `You need to be an admin of a group first. Create one here: ${env.PUBLIC_BASE_URL}/groups/new`,
+      content: `Only people who can manage this server (or admins of a private group) can set up a board.`,
     });
   }
   return reply({
@@ -222,7 +243,10 @@ const boardCommand: Handler = async ({ ctx, interaction, actor }) => {
         type: 3,
         custom_id: "bs:pick",
         placeholder: "Choose a group",
-        options: adminGroups.slice(0, 25).map((g) => ({ label: g.name, value: g.id })),
+        options: adminGroups.slice(0, 25).map((g) => ({
+          label: g.kind === "squad" ? `Squad: ${g.name}` : g.name,
+          value: g.id,
+        })),
       }),
     ],
   });
@@ -252,6 +276,11 @@ const COMMANDS: Record<string, Handler> = {
     const groupIds = inBoardGroup ? [board.groupId] : (await listMyGroups(ctx.db, actor.id)).map((g) => g.id);
     return who(ctx, actor, groupIds, offset);
   },
+  level: async ({ ctx, interaction, actor }) => {
+    const character = await setMainLevel(ctx.db, actor.id, Number(option(interaction.data?.options, "level")), "discord");
+    refresh(ctx, actor.id);
+    return reply({ content: `**${character.name}** is now level ${character.level}. Ding!` });
+  },
   board: boardCommand,
 };
 
@@ -260,12 +289,13 @@ const COMPONENTS: Record<string, Handler> = {
   "pl:start": async ({ ctx, interaction, actor, parts }) =>
     update(await planner(ctx.db, actor, parts[2], fromHhmm(interaction.data?.values?.[0]))),
   "pl:set": setDay,
+  "pl:add": addTime,
   "pl:clear": clearDay,
   "dl:to": async ({ ctx, actor, parts }) => {
-    const [, , day = "", to, was] = parts;
+    const [, , day = "", slot = "0", to, was] = parts;
     const target = fromHhmm(to);
     if (!target) throw new UserError("That button has expired. Run /delay again.");
-    const result = await moveStart(ctx.db, actor, day as LocalDate, target, "discord");
+    const result = await moveStart(ctx.db, actor, day as LocalDate, Number(slot), target, "discord");
     refresh(ctx, actor.id);
     return update(
       delayMessage({ ...result, from: fromHhmm(was) ?? result.from, sharedWith: await sharedGroupNames(ctx.db, actor.id) }),

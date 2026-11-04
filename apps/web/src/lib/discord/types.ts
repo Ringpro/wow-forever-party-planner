@@ -25,7 +25,9 @@ export type Interaction = {
   token: string;
   guild_id?: string;
   channel_id?: string;
-  member?: { user: DiscordUser; permissions: string };
+  member?: { user: DiscordUser; permissions: string; roles?: string[] };
+  /** "0" = installed in this server (guild install), "1" = installed by the user. */
+  authorizing_integration_owners?: Record<string, string>;
   user?: DiscordUser;
   data?: {
     name?: string;

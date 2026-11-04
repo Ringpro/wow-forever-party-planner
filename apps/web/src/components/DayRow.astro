@@ -1,60 +1,87 @@
 ---
-// One editable day (or weekday default): Yes / Maybe / No plus start and end time.
-// Works as a plain form; scripts/rows.ts upgrades it to save without a page reload.
-import { DEFAULT_START, TIME_OPTIONS } from "../lib/format.ts";
+// One editable day (or weekday default): No, or up to four Yes/Maybe time slots.
+// Each slot is a small form, so it works without JavaScript; scripts/rows.ts upgrades the row to
+// save in the background.
+import { DEFAULT_START, TIME_OPTIONS, timeOptionsWith } from "../lib/format.ts";
+
+type Slot = { status: "yes" | "maybe"; start: string | null; end: string | null };
 
 interface Props {
   id: string;
-  /** Short label on top, e.g. "Wed" or "Monday". */
+  /** Short label on top, e.g. "Wed" or "Mon". */
   title: string;
   /** Large label below, e.g. "28". Optional. */
   subtitle?: string;
   badge?: string;
   hidden: Record<string, string | number>;
+  /** The day as a whole. */
   status: "yes" | "maybe" | "no" | "unknown";
   kind: "explicit" | "default" | "unknown";
-  start: string | null;
-  end: string | null;
-  canClear: boolean;
+  slots: Slot[];
   note?: string;
 }
 
-const { id, title, subtitle, badge, hidden, status, kind, start, end, canClear, note } = Astro.props;
-const pressed = (s: string) => (status === s ? "true" : "false");
+const { id, title, subtitle, badge, hidden, status, kind, slots, note } = Astro.props;
+const MAX_SLOTS = 4;
+// A day with no slots still shows one line: Yes/Maybe/No plus a start time to use.
+const lines: (Slot | null)[] = slots.length > 0 ? slots : [null];
 ---
 
-<form method="post" class="day-row" id={id} data-row data-status={status} data-kind={kind}>
-  {Object.entries(hidden).map(([name, value]) => <input type="hidden" name={name} value={value} />)}
+<div class="day-row" id={id} data-row data-status={status} data-kind={kind}>
   <div class="day-date">
     <span class="dow">{title}</span>
     {subtitle && <span class="dom">{subtitle}</span>}
     {badge && <span class="badge">{badge}</span>}
   </div>
   <div class="day-main">
-    <div class="seg" role="group" aria-label={`Availability ${title} ${subtitle ?? ""}`}>
-      <button class="seg-btn yes" name="status" value="yes" aria-pressed={pressed("yes")}>Yes</button>
-      <button class="seg-btn maybe" name="status" value="maybe" aria-pressed={pressed("maybe")}>Maybe</button>
-      <button class="seg-btn no" name="status" value="no" aria-pressed={pressed("no")}>No</button>
-    </div>
-    <div class="day-times">
-      <select name="start" aria-label="Start time">
-        {TIME_OPTIONS.map((t) => <option selected={t === (start ?? DEFAULT_START)}>{t}</option>)}
-      </select>
-      <span class="muted" aria-hidden="true">–</span>
-      <select name="end" aria-label="End time (optional)">
-        <option value="">late</option>
-        {TIME_OPTIONS.map((t) => <option selected={t === end}>{t}</option>)}
-      </select>
-      {canClear && (
-        <button class="clear" name="status" value="clear" title="Clear this day" aria-label="Clear this day">
-          ×
-        </button>
+    {lines.map((slot, i) => (
+      <form method="post" class="slot" data-slot data-status={slot?.status ?? (i === 0 ? status : "unknown")}>
+        {Object.entries(hidden).map(([name, value]) => <input type="hidden" name={name} value={value} />)}
+        <input type="hidden" name="slot" value={i} />
+        <div class="seg" role="group" aria-label={`Availability ${title} ${subtitle ?? ""}`}>
+          <button class="seg-btn yes" name="status" value="yes" aria-pressed={slot?.status === "yes" ? "true" : "false"}>Yes</button>
+          <button class="seg-btn maybe" name="status" value="maybe" aria-pressed={slot?.status === "maybe" ? "true" : "false"}>Maybe</button>
+          {i === 0 && (
+            <button class="seg-btn no" name="status" value="no" aria-pressed={status === "no" ? "true" : "false"}>No</button>
+          )}
+        </div>
+        <div class="day-times">
+          <select name="start" aria-label="Start time">
+            {timeOptionsWith(TIME_OPTIONS, slot?.start).map((t) => (
+              <option selected={t === (slot?.start ?? DEFAULT_START)}>{t}</option>
+            ))}
+          </select>
+          <span class="muted" aria-hidden="true">–</span>
+          <select name="end" aria-label="End time (optional)">
+            <option value="">late</option>
+            {timeOptionsWith(TIME_OPTIONS, slot?.end).map((t) => <option selected={t === slot?.end}>{t}</option>)}
+          </select>
+          {slot && (kind === "explicit" || slots.length > 1) && (
+            <button class="clear" name="status" value="remove_slot" title="Remove this time" aria-label="Remove this time">
+              ×
+            </button>
+          )}
+        </div>
+      </form>
+    ))}
+    <div class="day-actions">
+      {slots.length > 0 && slots.length < MAX_SLOTS && (
+        <form method="post">
+          {Object.entries(hidden).map(([name, value]) => <input type="hidden" name={name} value={value} />)}
+          <button class="link small" name="status" value="add_slot">+ Add another time</button>
+        </form>
       )}
+      {kind === "explicit" && status === "no" && (
+        <form method="post">
+          {Object.entries(hidden).map(([name, value]) => <input type="hidden" name={name} value={value} />)}
+          <button class="link small" name="status" value="clear">Clear</button>
+        </form>
+      )}
+      {note && <span class="day-note">{note}</span>}
     </div>
-    {note && <p class="day-note">{note}</p>}
   </div>
   <span class="saved" aria-hidden="true">Saved</span>
-</form>
+</div>
 
 <style is:global>
   .day-list {
@@ -70,9 +97,7 @@ const pressed = (s: string) => (status === s ? "true" : "false");
     grid-template-columns: 52px 1fr;
     gap: 12px;
     padding: 14px 16px;
-    margin: 0;
     border-top: 1px solid var(--border);
-    transition: background 0.2s;
   }
   .day-row:first-child {
     border-top: 0;
@@ -82,10 +107,16 @@ const pressed = (s: string) => (status === s ? "true" : "false");
   }
   .day-main {
     display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+  .slot {
+    display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 8px 12px;
-    min-width: 0;
+    margin: 0;
   }
   .seg {
     display: inline-flex;
@@ -146,11 +177,11 @@ const pressed = (s: string) => (status === s ? "true" : "false");
     padding: 6px 8px;
     font-variant-numeric: tabular-nums;
   }
-  [data-status="no"] .day-times select,
-  [data-status="unknown"] .day-times select {
+  .slot[data-status="no"] .day-times select,
+  .slot[data-status="unknown"] .day-times select {
     color: var(--muted);
   }
-  [data-status="no"] .day-times select {
+  .slot[data-status="no"] .day-times {
     opacity: 0.45;
   }
   .clear {
@@ -167,9 +198,19 @@ const pressed = (s: string) => (status === s ? "true" : "false");
     background: var(--surface-3);
     color: var(--text);
   }
-  .day-note {
-    flex-basis: 100%;
+  .day-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 16px;
+  }
+  .day-actions form {
     margin: 0;
+  }
+  .day-actions:empty {
+    display: none;
+  }
+  .day-note {
     font-size: 0.8rem;
     color: var(--muted);
   }

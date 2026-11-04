@@ -1,7 +1,7 @@
 ---
 interface Props {
   title: string;
-  active?: "schedule" | "tools";
+  active?: "schedule" | "characters" | "tools";
 }
 const { title, active } = Astro.props;
 const user = Astro.locals.user;
@@ -22,10 +22,11 @@ const user = Astro.locals.user;
       <div class="wrap header-inner">
         <a href={user ? "/app" : "/"} class="brand">
           <img src="/muster.svg" width="28" height="28" alt="" />
-          Muster
+          <span>Muster</span>
         </a>
         <nav>
           {user && <a href="/app" aria-current={active === "schedule" ? "page" : undefined}>Schedule</a>}
+          {user && <a href="/app/characters" aria-current={active === "characters" ? "page" : undefined}>Characters</a>}
           <a href="/get" aria-current={active === "tools" ? "page" : undefined}>Tools</a>
           {user ? (
             <form method="post" action="/auth/logout">
@@ -179,6 +180,15 @@ const user = Astro.locals.user;
   }
   nav form {
     margin: 0;
+  }
+  @media (max-width: 480px) {
+    nav {
+      gap: 12px;
+      font-size: 0.9rem;
+    }
+    .brand span {
+      display: none;
+    }
   }
 
   /* Page header */
@@ -337,6 +347,16 @@ const user = Astro.locals.user;
   .chip.default {
     outline: 1px dashed currentColor;
     outline-offset: -1px;
+  }
+
+  /* Class colour dot next to a character or player name */
+  .class-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--c, var(--muted));
+    flex: none;
   }
 
   /* Date column used by schedule and group rows */

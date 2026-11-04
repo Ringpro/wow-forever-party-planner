@@ -1,13 +1,23 @@
 // Pure renderers for Discord messages. No database or network access, so they're easy to test.
 import { addMinutesInGamingDay, isoWeekday, type LocalDate, type Status, type WallTime } from "@muster/domain";
-import { DEFAULT_START, TIME_OPTIONS, dayLabel, timeIn } from "../format.ts";
+import { DEFAULT_START, DISCORD_TIME_OPTIONS, dayLabel, timeIn, timeOptionsWith } from "../format.ts";
 import { row, type ActionRow, type Button, type MessagePayload } from "./types.ts";
 
-type Answer = { status: Status; startLocal: string | null; endLocal: string | null; kind?: "explicit" | "default" };
+/** A day as the user answered it: the day status plus its Yes/Maybe time slots. */
+type Answer = {
+  status: Status;
+  kind?: "explicit" | "default";
+  slots: { status: Status; startLocal: string | null; endLocal: string | null }[];
+};
 
 type DayView = {
   day: LocalDate;
-  members: { displayName: string; status: Status | "unknown"; startsAt: number | null }[];
+  members: {
+    displayName: string;
+    status: Status | "unknown";
+    startsAt: number | null;
+    slots?: { status: "yes" | "maybe"; startsAt: number }[];
+  }[];
   counts: Record<Status | "unknown", number>;
   best: { startsAt: number; memberIds: string[]; includesMaybe: boolean } | null;
 };
@@ -26,8 +36,12 @@ export function fromHhmm(value: string | undefined): WallTime | null {
 
 function answerText(a: Answer | undefined): string {
   if (!a) return "not set";
-  const label = a.status === "yes" ? "Yes" : "Maybe";
-  const text = a.status === "no" ? `${ICON.no} No` : `${ICON[a.status]} ${label} from ${a.startLocal}${a.endLocal ? `–${a.endLocal}` : ""}`;
+  const text =
+    a.status === "no" || a.slots.length === 0
+      ? `${ICON.no} No`
+      : a.slots
+          .map((s) => `${ICON[s.status]} ${s.startLocal}${s.endLocal ? `–${s.endLocal}` : ""}`)
+          .join(", ");
   return a.kind === "default" ? `${text} (default)` : text;
 }
 
@@ -69,6 +83,9 @@ export function plannerMessage(input: PlannerInput): MessagePayload {
     statusButton("maybe", `${ICON.maybe} Maybe`, 1),
     statusButton("no", `${ICON.no} No`, 4),
   ];
+  if (current && current.status !== "no" && current.slots.length > 0 && current.slots.length < 4) {
+    buttons.push({ type: 2, style: 2, label: "+ Add time", custom_id: `pl:add:${selectedDay}:${hhmm(input.pendingStart)}` });
+  }
   if (current && current.kind !== "default") buttons.push({ type: 2, style: 2, label: "Clear", custom_id: `pl:clear:${selectedDay}` });
 
   const components: ActionRow[] = [
@@ -85,7 +102,9 @@ export function plannerMessage(input: PlannerInput): MessagePayload {
     row({
       type: 3,
       custom_id: `pl:start:${selectedDay}`,
-      options: TIME_OPTIONS.map((t) => ({ label: `From ${t}`, value: hhmm(t), default: t === input.pendingStart })),
+      options: timeOptionsWith(DISCORD_TIME_OPTIONS, input.pendingStart)
+        .slice(-25)
+        .map((t) => ({ label: `From ${t}`, value: hhmm(t), default: t === input.pendingStart })),
     }),
     row(...buttons),
     row({ type: 2, style: 5, label: "Open website", url: `${input.websiteUrl}/app` }),
@@ -96,7 +115,8 @@ export function plannerMessage(input: PlannerInput): MessagePayload {
       `**Your plans** · times in ${input.tz.replaceAll("_", " ")}`,
       ...lines,
       "",
-      input.notice ?? `Editing **${dayLabel(selectedDay)}**: pick a start time, then Yes, Maybe or No.`,
+      input.notice ??
+        `Editing **${dayLabel(selectedDay)}**: pick a start time, then Yes, Maybe or No. **+ Add time** keeps the times you have and adds this one.`,
       sharedLine(input.sharedWith),
     ].join("\n"),
     components,
@@ -104,7 +124,7 @@ export function plannerMessage(input: PlannerInput): MessagePayload {
 }
 
 export function plannerStart(entry: Answer | undefined): WallTime {
-  return entry?.startLocal ?? DEFAULT_START;
+  return entry?.slots[0]?.startLocal ?? DEFAULT_START;
 }
 
 // ── Time zone picker ─────────────────────────────────────────────────────────────────────
@@ -156,6 +176,7 @@ export function timezoneMessage(websiteUrl: string): MessagePayload {
 
 export type DelayInput = {
   day: LocalDate;
+  slot: number;
   from: WallTime;
   to: WallTime;
   ignored: boolean;
@@ -171,8 +192,10 @@ export function delayMessage(input: DelayInput): MessagePayload {
       : `${dayLabel(day)}: **${to}** (was ${from})`;
   const buttons: Button[] = [];
   const later = addMinutesInGamingDay(to, 30);
-  if (later) buttons.push({ type: 2, style: 1, label: "+30 more", custom_id: `dl:to:${day}:${hhmm(later)}:${hhmm(to)}` });
-  if (from !== to) buttons.push({ type: 2, style: 2, label: `Undo (${from})`, custom_id: `dl:to:${day}:${hhmm(from)}:${hhmm(from)}` });
+  // Absolute targets, so pressing a button twice can't move the time twice. Slot = which time that day.
+  const id = (target: WallTime, was: WallTime) => `dl:to:${day}:${input.slot}:${hhmm(target)}:${hhmm(was)}`;
+  if (later) buttons.push({ type: 2, style: 1, label: "+30 more", custom_id: id(later, to) });
+  if (from !== to) buttons.push({ type: 2, style: 2, label: `Undo (${from})`, custom_id: id(from, from) });
   return {
     content: `${headline}\n${sharedLine(input.sharedWith)}`,
     components: buttons.length > 0 ? [row(...buttons)] : [],
@@ -204,7 +227,10 @@ function dayHeadline(d: DayView, tz: string): string {
 function dayMembersLine(d: DayView, tz: string): string | null {
   const parts = d.members
     .filter((m) => m.status === "yes" || m.status === "maybe")
-    .map((m) => `${ICON[m.status as "yes" | "maybe"]} ${m.displayName}${m.startsAt !== null ? ` ${timeIn(m.startsAt, tz)}` : ""}`);
+    .map((m) => {
+      const times = m.slots?.length ? m.slots.map((s) => timeIn(s.startsAt, tz)) : m.startsAt !== null ? [timeIn(m.startsAt, tz)] : [];
+      return `${ICON[m.status as "yes" | "maybe"]} ${m.displayName}${times.length ? ` ${times.join(" & ")}` : ""}`;
+    });
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
