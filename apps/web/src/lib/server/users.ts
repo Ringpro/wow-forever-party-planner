@@ -1,6 +1,6 @@
 import { schema, type Db } from "@muster/db";
 import { isValidTimeZone } from "@muster/domain";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { SessionUser } from "./session.ts";
 
 /** Finds the user behind a Discord account, creating one on first sight (architecture §4.1). */
@@ -49,6 +49,17 @@ export async function getUser(db: Db, userId: string): Promise<SessionUser | nul
     .where(eq(schema.users.id, userId))
     .get();
   return user ?? null;
+}
+
+/** Discord user IDs for a set of users, for clickable @mentions. */
+export async function discordIdsFor(db: Db, userIds: string[]): Promise<Map<string, string>> {
+  if (userIds.length === 0) return new Map();
+  const rows = await db
+    .select({ userId: schema.userIdentities.userId, externalId: schema.userIdentities.externalId })
+    .from(schema.userIdentities)
+    .where(and(eq(schema.userIdentities.provider, "discord"), inArray(schema.userIdentities.userId, userIds)));
+  // Dev logins use fake ids; only real Discord snowflakes make working mentions.
+  return new Map(rows.filter((r) => /^\d{5,25}$/.test(r.externalId)).map((r) => [r.userId, r.externalId]));
 }
 
 export async function setTimezone(db: Db, userId: string, timezone: string): Promise<void> {

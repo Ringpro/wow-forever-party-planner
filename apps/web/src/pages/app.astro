@@ -1,90 +1,115 @@
 ---
-import DayRow from "../components/DayRow.astro";
+// Overview: tonight and the next two weeks across all your servers, squads and groups.
 import Layout from "../layouts/Layout.astro";
-import { dayLabel } from "../lib/format.ts";
+import { HOUR } from "@muster/domain";
+import { dayLabel, timeIn } from "../lib/format.ts";
 import {
-  addSlot,
-  clearAvailability,
-  copyWeekForward,
+  groupWeek,
   myDays,
-  planningWeeks,
-  removeSlot,
-  setSlot,
+  planningDays,
+  setFreeNow,
+  shiftToday,
+  type GroupWeek,
 } from "../lib/server/availability.ts";
 import { refreshBoardsLater } from "../lib/server/background.ts";
+import { CLASS_COLORS } from "../lib/server/characters.ts";
 import { getDb } from "../lib/server/db.ts";
 import { listMyGroups, setSharing } from "../lib/server/groups.ts";
 import { UserError } from "../lib/server/users.ts";
-import { addDays } from "@muster/domain";
 
 const user = Astro.locals.user!;
 const tz = user.timezone!;
 const db = getDb();
 let error: string | null = null;
-const copied = Astro.url.searchParams.get("copied");
-const notice =
-  copied === null
-    ? null
-    : copied === "0"
-      ? "Nothing to copy: next week already has answers for those days, or this week is empty."
-      : `Copied ${copied} ${copied === "1" ? "day" : "days"} to next week.`;
+let notice: string | null = null;
 
 if (Astro.request.method === "POST") {
   const form = await Astro.request.formData();
-  const day = String(form.get("day") ?? "");
-  const status = String(form.get("status") ?? "");
+  const action = String(form.get("action") ?? "");
   try {
-    const shareGroupId = String(form.get("share_group") ?? "");
-    if (shareGroupId) {
-      await setSharing(db, user.id, shareGroupId, form.get("share") === "yes");
-      refreshBoardsLater(Astro.locals, { groupIds: [shareGroupId] });
+    if (action === "share") {
+      const groupId = String(form.get("group") ?? "");
+      await setSharing(db, user.id, groupId, form.get("share") === "yes");
+      refreshBoardsLater(Astro.locals, { groupIds: [groupId] });
       return Astro.redirect("/app");
     }
-    if (status === "copy_week") {
-      const count = await copyWeekForward(db, user);
+    if (action === "free") {
+      await setFreeNow(db, user.id, Date.now() + 2 * HOUR);
       refreshBoardsLater(Astro.locals, { userId: user.id });
-      return Astro.redirect(`/app?copied=${count}#week-next`);
+      return Astro.redirect("/app?done=free");
     }
-    const slot = Number(form.get("slot") ?? 0);
-    if (status === "clear") await clearAvailability(db, user.id, day);
-    else if (status === "add_slot") await addSlot(db, user, day, "web");
-    else if (status === "remove_slot") await removeSlot(db, user, day, slot, "web");
-    else {
-      await setSlot(
-        db,
-        user,
-        day,
-        slot,
-        { status, startLocal: String(form.get("start") ?? "") || null, endLocal: String(form.get("end") ?? "") || null },
-        "web",
-      );
+    if (action === "late") {
+      const shifted = await shiftToday(db, user, 30, "web");
+      refreshBoardsLater(Astro.locals, { userId: user.id });
+      return Astro.redirect(`/app?done=late&to=${shifted.to}`);
     }
-    refreshBoardsLater(Astro.locals, { userId: user.id });
-    return Astro.redirect(`/app#d-${day}`);
   } catch (e) {
     if (!(e instanceof UserError)) throw e;
     error = e.message;
   }
 }
 
-const weeks = planningWeeks(tz);
-const today = weeks[0]!.days[0]!;
-const answers = await myDays(db, user.id, weeks.flatMap((w) => w.days));
+const done = Astro.url.searchParams.get("done");
+if (done === "free") notice = "You're marked as free for the next 2 hours.";
+if (done === "late") notice = `Moved today's start to ${Astro.url.searchParams.get("to")}.`;
+
+const days = planningDays(tz);
+const today = days[0]!;
 const groups = await listMyGroups(db, user.id);
-// Servers found at login start unshared; ask once instead of sharing silently.
 const undecided = groups.filter((g) => g.kind === "server" && g.shareDecidedAt === null);
-const range = (monday: string) => `${dayLabel(monday).slice(4)} – ${dayLabel(addDays(monday, 6)).slice(4)}`;
-const dow = (day: string) => dayLabel(day).slice(0, 3);
-const dom = (day: string) => String(Number(day.slice(8)));
+const weeks = (await Promise.all(groups.map((g) => groupWeek(db, user, g.id, days)))).filter(
+  (w): w is GroupWeek => w !== null,
+);
+const mine = await myDays(db, user.id, days);
+const kindOf = new Map(groups.map((g) => [g.id, g.kind]));
+
+const freeNow = [
+  ...new Map(
+    weeks.flatMap((w) => w.freeNow.filter((f) => f.userId !== user.id).map((f) => [f.userId, { ...f, group: w.group.name }])),
+  ).values(),
+];
+
+const hour = Number(timeIn(Date.now(), tz).slice(0, 2));
+const greeting = hour < 5 || hour >= 18 ? "Evening" : hour < 12 ? "Morning" : "Afternoon";
+const firstName = user.displayName.split(/\s+/)[0];
+const dow = (d: string) => (d === today ? "Today" : dayLabel(d).slice(0, 3));
+const dom = (d: string) => String(Number(d.slice(8)));
+const iconLetter = (name: string) => name.slice(0, 1).toUpperCase();
+const kindLabel = (w: GroupWeek) =>
+  kindOf.get(w.group.id) === "server" ? "Discord server" : kindOf.get(w.group.id) === "squad" ? "Squad" : "Private group";
+
+const tonight = weeks.map((w) => {
+  const day = w.days[0]!;
+  const playing = day.members.filter((m) => m.status === "yes" || m.status === "maybe");
+  return {
+    week: w,
+    best: day.best,
+    summary: day.best
+      ? `${day.best.memberIds.length} of ${w.members.length} can play${day.best.includesMaybe ? " if the Maybes come" : ""}`
+      : playing.length > 0
+        ? `${playing.length} of ${w.members.length} so far, not enough yet`
+        : "Nobody has answered yet",
+    people: playing.map((m) => ({
+      name: m.displayName,
+      time: m.slots[0] ? timeIn(m.slots[0].startsAt, tz) : "",
+      maybe: m.status === "maybe",
+      color: w.characters.get(m.userId) ? CLASS_COLORS[w.characters.get(m.userId)!.class] : "var(--muted)",
+    })),
+  };
+});
 ---
 
-<Layout title="Schedule" active="schedule">
-  <div class="page-head">
-    <h1>When can you play?</h1>
-    <p class="muted small">
-      Times in {tz.replaceAll("_", " ")} (<a href="/onboarding?return_to=/app">change</a>). Days you leave empty use your{" "}
-      <a href="/app/defaults">weekly defaults</a>.
-    </p>
+<Layout title="Overview" active="overview">
+  <div class="overview-head">
+    <div>
+      <div class="muted small strong">{dayLabel(today)} · {tz.replaceAll("_", " ")}</div>
+      <h1>{greeting}, {firstName}</h1>
+    </div>
+    <div class="quick">
+      <form method="post"><input type="hidden" name="action" value="free" /><button class="button go">I'm free now</button></form>
+      <form method="post"><input type="hidden" name="action" value="late" /><button class="button secondary">Running late</button></form>
+      <a class="button" href="/app/schedule">Plan my week</a>
+    </div>
   </div>
 
   <div id="flash">
@@ -94,8 +119,9 @@ const dom = (day: string) => String(Number(day.slice(8)));
 
   {undecided.map((g) => (
     <form method="post" class="card share-ask">
-      <input type="hidden" name="share_group" value={g.id} />
-      {g.iconUrl && <img class="server-icon" src={g.iconUrl} width="36" height="36" alt="" />}
+      <input type="hidden" name="action" value="share" />
+      <input type="hidden" name="group" value={g.id} />
+      {g.iconUrl ? <img class="g-icon" src={g.iconUrl} width="36" height="36" alt="" /> : <span class="g-icon letter">{iconLetter(g.name)}</span>}
       <div class="share-ask-text">
         <strong>Share your schedule with {g.name}?</strong>
         <span class="muted small">You're in this Discord server, and it uses Muster.</span>
@@ -107,82 +133,187 @@ const dom = (day: string) => String(Number(day.slice(8)));
     </form>
   ))}
 
-  {weeks.map((week) => (
-    <section id={`week-${week.key}`}>
-      <div class="week-head">
-        <h2>
-          {week.key === "this" ? "This week" : "Next week"} <span class="muted small">{range(week.monday)}</span>
-        </h2>
-        {week.key === "next" && (
-          <form method="post">
-            <button class="link small" name="status" value="copy_week">Copy this week</button>
-          </form>
-        )}
-      </div>
-      <div class="day-list">
-        {week.days.map((day) => {
-          const a = answers.get(day)!;
-          return (
-            <DayRow
-              id={`d-${day}`}
-              title={dow(day)}
-              subtitle={dom(day)}
-              badge={day === today ? "Today" : undefined}
-              hidden={{ day }}
-              status={a.kind === "unknown" ? "unknown" : a.status}
-              kind={a.kind}
-              slots={a.kind === "unknown" ? [] : a.slots.map((s) => ({ status: s.status as "yes" | "maybe", start: s.startLocal, end: s.endLocal }))}
-              note={a.kind === "default" ? "From your weekly default" : undefined}
-            />
-          );
-        })}
-      </div>
-    </section>
-  ))}
+  {freeNow.length > 0 && (
+    <div class="free-strip">
+      <span class="pulse" aria-hidden="true"></span>
+      <span>
+        {freeNow.map((f, i) => (
+          <>
+            {i > 0 && ", "}
+            <strong>{f.displayName}</strong> until {timeIn(f.until, tz)}
+          </>
+        ))}
+        {" "}{freeNow.length === 1 ? "is" : "are"} free right now
+      </span>
+    </div>
+  )}
 
-  <section>
-    <div class="week-head">
-      <h2>Your servers and groups</h2>
+  {weeks.length === 0 ? (
+    <div class="card empty">
+      <h2>Gather your party</h2>
+      <p class="muted">
+        Muster finds your Discord servers when you log in. <a href="/get">Add Muster to your server</a>, then log in again.
+        Not on Discord together? <a href="/groups/new">Create a private group</a>.
+      </p>
     </div>
-    <div class="card">
-      {groups.length === 0 ? (
-        <p class="muted" style="margin:0">
-          Muster finds your Discord servers when you log in. <a href="/get">Add Muster to your server</a>, then log in
-          again.
-        </p>
-      ) : (
-        <ul class="plain">
-          {groups.map((g) => (
-            <li class={`list-row${g.kind === "squad" ? " squad" : ""}`}>
-              <span class="group-name">
-                {g.kind === "server" &&
-                  (g.iconUrl ? (
-                    <img class="server-icon" src={g.iconUrl} width="24" height="24" alt="" />
-                  ) : (
-                    <span class="server-icon placeholder" aria-hidden="true">{g.name.slice(0, 1)}</span>
+  ) : (
+    <>
+      <section>
+        <h2>Tonight</h2>
+        <div class="tonight">
+          {tonight.map((t) => (
+            <a class="card tonight-card" href={`/groups/${t.week.group.id}`}>
+              <div class="t-head">
+                {t.week.group.iconUrl ? (
+                  <img class="g-icon" src={t.week.group.iconUrl} width="34" height="34" alt="" />
+                ) : (
+                  <span class="g-icon letter">{iconLetter(t.week.group.name)}</span>
+                )}
+                <span class="t-name">
+                  <strong>{t.week.group.name}</strong>
+                  <span class="muted small">{kindLabel(t.week)}</span>
+                </span>
+              </div>
+              <div class="t-time">
+                <span class={`big ${t.best ? (t.best.includesMaybe ? "possible" : "enough") : "none"}`}>
+                  {t.best ? timeIn(t.best.startsAt, tz) : "–"}
+                </span>
+                <span class="t-summary">{t.summary}</span>
+              </div>
+              {t.people.length > 0 && (
+                <div class="people">
+                  {t.people.map((p) => (
+                    <span class={`person${p.maybe ? " maybe" : ""}`}>
+                      <span class="class-dot" style={`--c:${p.color}`}></span>
+                      {p.name} {p.time}
+                    </span>
                   ))}
-                <a href={`/groups/${g.id}`}>{g.name}</a>
-              </span>
-              <span class="muted small">
-                {g.kind === "squad" ? "Squad" : g.kind === "private" ? "Private group" : g.role === "admin" ? "Admin" : ""}
-                {!g.shareAvailability && " · not sharing"}
-              </span>
-            </li>
+                </div>
+              )}
+            </a>
           ))}
-        </ul>
-      )}
-    </div>
-    <p class="muted small">
-      Not on Discord together? <a href="/groups/new">Create a private group</a> with an invite link.
-    </p>
-  </section>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>Next two weeks</h2>
+          <div class="legend muted small">
+            <span><span class="class-dot" style="--c:var(--yes)"></span> Enough players</span>
+            <span><span class="class-dot" style="--c:var(--maybe)"></span> If the Maybes come</span>
+            <span>Dashed = your weekly default</span>
+          </div>
+        </div>
+        <div class="grid-box">
+          <div class="grid" style={`grid-template-columns: var(--name-col) repeat(${days.length}, minmax(58px, 1fr));`}>
+            <span></span>
+            {days.map((d) => (
+              <span class={`col-head${d === today ? " is-today" : ""}`}>
+                <strong>{dow(d)}</strong>
+                <span>{dom(d)}</span>
+              </span>
+            ))}
+
+            <span class="row-name">
+              <span class="g-icon letter small me">{iconLetter(user.displayName)}</span>
+              <span>You<span class="muted tiny">Your answers</span></span>
+            </span>
+            {days.map((d) => {
+              const a = mine.get(d)!;
+              const status = a.kind === "unknown" ? "unknown" : a.status;
+              const first = a.kind === "unknown" ? null : a.slots[0];
+              const more = a.kind === "unknown" ? 0 : a.slots.length - 1;
+              return (
+                <a
+                  href={`/app/schedule#d-${d}`}
+                  class={`cell me-${status}${a.kind === "default" ? " me-default" : ""}${d === today ? " is-today" : ""}`}
+                >
+                  <span class="t">{status === "no" ? "No" : first?.startLocal ?? "?"}</span>
+                  <span>{more > 0 ? `+${more} more` : status === "maybe" ? "Maybe" : status === "yes" ? "Yes" : ""}</span>
+                </a>
+              );
+            })}
+
+            {weeks.map((w) => (
+              <>
+                <a class={`row-name${kindOf.get(w.group.id) === "squad" ? " squad" : ""}`} href={`/groups/${w.group.id}`}>
+                  {w.group.iconUrl ? (
+                    <img class="g-icon small" src={w.group.iconUrl} width="22" height="22" alt="" />
+                  ) : (
+                    <span class="g-icon letter small">{iconLetter(w.group.name)}</span>
+                  )}
+                  <span>
+                    {w.group.name}
+                    <span class="muted tiny">
+                      {w.members.length} {w.members.length === 1 ? "member" : "members"}
+                    </span>
+                  </span>
+                </a>
+                {w.days.map((gd) => (
+                  <a
+                    href={`/groups/${w.group.id}`}
+                    class={`cell ${gd.best ? (gd.best.includesMaybe ? "possible" : "enough") : "none"}${gd.day === today ? " is-today" : ""}`}
+                  >
+                    <span class="t">{gd.best ? timeIn(gd.best.startsAt, tz) : "–"}</span>
+                    <span>{gd.best ? `${gd.best.memberIds.length}/${w.members.length}` : ""}</span>
+                  </a>
+                ))}
+              </>
+            ))}
+          </div>
+        </div>
+        <p class="muted small">Each cell is the earliest time enough people overlap. Open a server for who and when.</p>
+      </section>
+    </>
+  )}
 </Layout>
 
-<script>
-  import "../scripts/rows.ts";
-</script>
-
 <style>
+  .overview-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+  .overview-head h1 {
+    font-size: 30px;
+    margin: 4px 0 0;
+  }
+  .strong {
+    font-weight: 500;
+  }
+  .quick {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .quick form {
+    margin: 0;
+  }
+  .button.go {
+    background: var(--yes);
+    color: #fff;
+  }
+  @media (max-width: 640px) {
+    .quick {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      width: 100%;
+    }
+    .quick form,
+    .quick .button {
+      width: 100%;
+    }
+    .quick .button {
+      padding: 6px 8px;
+      font-size: 13px;
+      text-align: center;
+      line-height: 1.2;
+    }
+  }
   .share-ask {
     display: flex;
     flex-wrap: wrap;
@@ -192,31 +323,263 @@ const dom = (day: string) => String(Number(day.slice(8)));
   .share-ask-text {
     display: flex;
     flex-direction: column;
-    flex: 1 1 200px;
+    flex: 1 1 220px;
   }
   .share-ask-buttons {
     display: flex;
     gap: 8px;
   }
-  .server-icon {
-    border-radius: 8px;
+  .g-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
     flex: none;
+    object-fit: cover;
   }
-  .server-icon.placeholder {
-    display: inline-grid;
-    place-items: center;
-    width: 24px;
-    height: 24px;
-    background: var(--surface-3);
-    font-size: 0.8rem;
+  .g-icon.letter {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #a8322d;
+    color: #fff;
     font-weight: 700;
   }
-  .group-name {
-    display: inline-flex;
+  .g-icon.small {
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    font-size: 11px;
+  }
+  .g-icon.me {
+    background: #2b4a8a;
+  }
+  .free-strip {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: 12px;
+    background: var(--yes-soft);
+    border: 1px solid rgba(59, 163, 107, 0.35);
+    margin-bottom: 8px;
+  }
+  .pulse {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--yes);
+    box-shadow: 0 0 0 4px rgba(59, 163, 107, 0.25);
+    flex: none;
+  }
+  .empty h2 {
+    margin-top: 0;
+  }
+  .tonight {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 14px;
+  }
+  .tonight-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin: 0;
+    color: var(--text);
+    text-decoration: none;
+  }
+  .tonight-card:hover {
+    border-color: var(--surface-3);
+  }
+  .t-head {
+    display: flex;
     align-items: center;
     gap: 10px;
   }
-  .list-row.squad .group-name {
-    padding-left: 34px;
+  .t-name {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.3;
+  }
+  .t-time {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .big {
+    font-size: 34px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .big.enough {
+    color: #7fd6a4;
+  }
+  .big.possible {
+    color: #f0c45a;
+  }
+  .big.none {
+    color: var(--muted);
+  }
+  .t-summary {
+    color: #c9c6cf;
+  }
+  .people {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .person {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    font-size: 13px;
+    color: #9be3b9;
+  }
+  .person.maybe {
+    color: #f5cf6e;
+  }
+  .person .class-dot {
+    width: 8px;
+    height: 8px;
+  }
+  .section-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .legend {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin: 32px 0 12px;
+  }
+  .grid-box {
+    overflow-x: auto;
+    border-radius: var(--radius);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    margin-bottom: 8px;
+  }
+  .grid {
+    --name-col: 170px;
+    display: grid;
+    gap: 6px;
+    padding: 14px;
+    min-width: max-content;
+    align-items: center;
+  }
+  .grid > .row-name,
+  .grid > span:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    align-self: stretch;
+    background: var(--surface);
+    box-shadow: 8px 0 8px -8px rgba(0, 0, 0, 0.6);
+  }
+  @media (max-width: 640px) {
+    .grid {
+      --name-col: 104px;
+      padding: 10px;
+    }
+    .row-name {
+      font-size: 13px;
+      overflow: hidden;
+    }
+    .row-name .g-icon {
+      display: none;
+    }
+    .legend {
+      gap: 4px 14px;
+    }
+  }
+  .col-head {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.3;
+  }
+  .col-head.is-today {
+    color: var(--accent);
+  }
+  .row-name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    text-decoration: none;
+  }
+  .row-name > span:last-child {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.2;
+  }
+  .row-name.squad {
+    padding-left: 18px;
+  }
+  .tiny {
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .cell {
+    height: 52px;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    font-size: 12px;
+    line-height: 1.2;
+    text-decoration: none;
+  }
+  .cell .t {
+    font-weight: 700;
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+  }
+  .cell.is-today {
+    box-shadow: inset 0 0 0 2px var(--accent);
+  }
+  .enough {
+    background: rgba(59, 163, 107, 0.18);
+    color: #7fd6a4;
+  }
+  .possible {
+    background: rgba(217, 166, 40, 0.16);
+    color: #f0c45a;
+  }
+  .none {
+    background: #1f222b;
+    color: #6f6c78;
+  }
+  .me-yes {
+    background: rgba(59, 163, 107, 0.22);
+    color: #9be3b9;
+  }
+  .me-maybe {
+    background: rgba(217, 166, 40, 0.2);
+    color: #f5cf6e;
+  }
+  .me-no {
+    background: rgba(208, 87, 74, 0.16);
+    color: #ef8f84;
+  }
+  .me-unknown {
+    color: #6f6c78;
+    box-shadow: inset 0 0 0 1px #2d313d;
+  }
+  .me-default {
+    outline: 1px dashed currentColor;
+    outline-offset: -3px;
   }
 </style>

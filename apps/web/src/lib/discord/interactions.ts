@@ -1,7 +1,7 @@
 // Routes verified Discord interactions to use cases. Every handler acts as the Discord user who
 // clicked or typed; custom_ids only say what to do, never who may do it (architecture §5.1).
 import { env } from "cloudflare:workers";
-import { HOUR, minutesIntoGamingDay, type LocalDate } from "@muster/domain";
+import { HOUR, isoWeekday, type LocalDate } from "@muster/domain";
 import type { Db } from "@muster/db";
 import { dayLabel } from "../format.ts";
 import {
@@ -11,7 +11,8 @@ import {
   moveStart,
   addSlot,
   myDays,
-  setAvailability,
+  removeSlot,
+  setDayStatus,
   setFreeNow,
   sharedGroupNames,
   shiftToday,
@@ -22,7 +23,7 @@ import { syncFromInteraction } from "../server/discord-sync.ts";
 import { boardForChannel, refreshBoardsFor, removeBoard, setupBoard } from "../server/boards.ts";
 import { getGroupAsMember, listMyGroups } from "../server/groups.ts";
 import type { SessionUser } from "../server/session.ts";
-import { UserError, findOrCreateDiscordUser, getUser, setTimezone } from "../server/users.ts";
+import { UserError, discordIdsFor, findOrCreateDiscordUser, getUser, setTimezone } from "../server/users.ts";
 import {
   InteractionType,
   Permission,
@@ -84,7 +85,7 @@ export async function handleInteraction(
   } else if (interaction.type === InteractionType.MessageComponent) {
     parts = (interaction.data?.custom_id ?? "").split(":");
     if (parts[0] === "tz" && parts[1] === "set") return pickTimezone(ctx, user, interaction);
-    handler = COMPONENTS[`${parts[0]}:${parts[1]}`];
+    handler = COMPONENTS[`${parts[0]}:${parts[1]}`] ?? COMPONENTS[parts[0] ?? ""];
   } else {
     return null;
   }
@@ -144,26 +145,36 @@ async function pickTimezone(ctx: InteractionContext, user: SessionUser, interact
   return update(await planner(ctx.db, { ...user, timezone: tz }, undefined, undefined, `Time zone set to ${tz}.`));
 }
 
-const setDay: Handler = async ({ ctx, actor, parts }) => {
-  const [, , day = "", status = "", time] = parts;
-  const start = fromHhmm(time);
-  const existing = (await myDays(ctx.db, actor.id, [day])).get(day);
-  const firstEnd = existing && existing.kind !== "unknown" ? existing.slots[0]?.endLocal : null;
-  // Discord has no end-time picker; keep the website's end time if it still fits.
-  const endLocal =
-    firstEnd && start && minutesIntoGamingDay(firstEnd) > minutesIntoGamingDay(start) ? firstEnd : null;
-  await setAvailability(ctx.db, actor, { day, status, startLocal: start, endLocal }, "discord");
-  refresh(ctx, actor.id);
-  return update(await planner(ctx.db, actor, day, start, `Saved **${dayLabel(day)}**.`));
+const showDay: Handler = async ({ ctx, interaction, actor, parts }) =>
+  update(await planner(ctx.db, actor, parts[2] || interaction.data?.values?.[0]));
+
+const showWeek: Handler = async ({ ctx, actor, parts }) => {
+  const days = planningDays(actor.timezone);
+  const nextWeekAt = days.findIndex((d, i) => i > 0 && isoWeekday(d) === 1);
+  return update(await planner(ctx.db, actor, parts[2] === "next" && nextWeekAt !== -1 ? days[nextWeekAt] : days[0]));
 };
 
 const addTime: Handler = async ({ ctx, actor, parts }) => {
-  const [, , day = "", time] = parts;
+  const [, , day = "", time, status] = parts;
   const start = fromHhmm(time);
   if (!start) throw new UserError("Pick a start time first.");
-  await addSlot(ctx.db, actor, day, "discord", start);
+  await addSlot(ctx.db, actor, day, "discord", start, status === "maybe" ? "maybe" : "yes");
   refresh(ctx, actor.id);
-  return update(await planner(ctx.db, actor, day, start, `Added ${start} to **${dayLabel(day)}**.`));
+  return update(await planner(ctx.db, actor, day, start, `Saved ${start} on **${dayLabel(day)}**.`));
+};
+
+const cantPlay: Handler = async ({ ctx, actor, parts }) => {
+  const day = parts[2] ?? "";
+  await setDayStatus(ctx.db, actor, day, "no", "discord");
+  refresh(ctx, actor.id);
+  return update(await planner(ctx.db, actor, day, null, `Saved: can't play **${dayLabel(day)}**.`));
+};
+
+const removeTime: Handler = async ({ ctx, actor, parts }) => {
+  const [, , day = "", index = "0"] = parts;
+  await removeSlot(ctx.db, actor, day, Number(index), "discord");
+  refresh(ctx, actor.id);
+  return update(await planner(ctx.db, actor, day, null, `Removed a time from **${dayLabel(day)}**.`));
 };
 
 const clearDay: Handler = async ({ ctx, actor, parts }) => {
@@ -188,14 +199,22 @@ async function delayToday(ctx: InteractionContext, actor: SessionUser & { timezo
   return reply(delayMessage({ ...result, sharedWith: await sharedGroupNames(ctx.db, actor.id) }));
 }
 
-async function who(ctx: InteractionContext, actor: SessionUser & { timezone: string }, groupIds: string[], offset: number) {
+/** Who's playing on one day, with clickable names and a picker for other days. */
+async function whoOn(ctx: InteractionContext, actor: SessionUser & { timezone: string }, scope: string, day?: string) {
+  const days = planningDays(actor.timezone);
+  const selected = day && days.includes(day) ? day : days[0]!;
+  const groupIds = scope === "all" ? (await listMyGroups(ctx.db, actor.id)).map((g) => g.id) : [scope];
   const groups = [];
+  const memberIds = new Set<string>();
   for (const groupId of groupIds) {
-    const week = await groupWeek(ctx.db, actor, groupId);
-    const day = week?.days[offset];
-    if (week && day) groups.push({ groupName: week.group.name, day, freeNow: week.freeNow });
+    const week = await groupWeek(ctx.db, actor, groupId, [selected]);
+    const groupDay = week?.days[0];
+    if (!week || !groupDay) continue;
+    groups.push({ groupName: week.group.name, day: groupDay, freeNow: selected === days[0] ? week.freeNow : [] });
+    for (const m of week.members) memberIds.add(m.userId);
   }
-  return reply(whoMessage(groups, actor.timezone));
+  const mentions = await discordIdsFor(ctx.db, [...memberIds]);
+  return whoMessage(groups, actor.timezone, mentions, { customId: `wd:${scope}`, days, selected });
 }
 
 /** Board buttons only work for members of the board's group. */
@@ -270,11 +289,11 @@ const COMMANDS: Record<string, Handler> = {
   delay: async ({ ctx, interaction, actor }) =>
     delayToday(ctx, actor, Number(option(interaction.data?.options, "minutes") ?? 30)),
   who: async ({ ctx, interaction, actor }) => {
-    const offset = option(interaction.data?.options, "day") === "tomorrow" ? 1 : 0;
+    const tomorrow = option(interaction.data?.options, "day") === "tomorrow";
     const board = interaction.channel_id ? await boardForChannel(ctx.db, interaction.channel_id) : undefined;
     const inBoardGroup = board && (await getGroupAsMember(ctx.db, actor.id, board.groupId));
-    const groupIds = inBoardGroup ? [board.groupId] : (await listMyGroups(ctx.db, actor.id)).map((g) => g.id);
-    return who(ctx, actor, groupIds, offset);
+    const days = planningDays(actor.timezone);
+    return reply(await whoOn(ctx, actor, inBoardGroup ? board.groupId : "all", tomorrow ? days[1] : days[0]));
   },
   level: async ({ ctx, interaction, actor }) => {
     const character = await setMainLevel(ctx.db, actor.id, Number(option(interaction.data?.options, "level")), "discord");
@@ -285,12 +304,20 @@ const COMMANDS: Record<string, Handler> = {
 };
 
 const COMPONENTS: Record<string, Handler> = {
-  "pl:day": async ({ ctx, interaction, actor }) => update(await planner(ctx.db, actor, interaction.data?.values?.[0])),
+  "pl:day": showDay,
+  "pl:week": showWeek,
   "pl:start": async ({ ctx, interaction, actor, parts }) =>
     update(await planner(ctx.db, actor, parts[2], fromHhmm(interaction.data?.values?.[0]))),
-  "pl:set": setDay,
   "pl:add": addTime,
+  "pl:no": cantPlay,
+  "pl:rm": removeTime,
   "pl:clear": clearDay,
+  // "Who's on" day picker: wd:all or wd:<groupId>.
+  wd: async ({ ctx, interaction, actor, parts }) => {
+    const scope = parts[1] ?? "all";
+    if (scope !== "all") await requireMember(ctx, actor.id, scope);
+    return update(await whoOn(ctx, actor, scope, interaction.data?.values?.[0]));
+  },
   "dl:to": async ({ ctx, actor, parts }) => {
     const [, , day = "", slot = "0", to, was] = parts;
     const target = fromHhmm(to);
@@ -322,6 +349,6 @@ const COMPONENTS: Record<string, Handler> = {
   "bd:who": async ({ ctx, actor, parts }) => {
     const groupId = parts[2] ?? "";
     await requireMember(ctx, actor.id, groupId);
-    return who(ctx, actor, [groupId], 0);
+    return reply(await whoOn(ctx, actor, groupId));
   },
 };

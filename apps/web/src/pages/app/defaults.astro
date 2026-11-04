@@ -3,10 +3,10 @@ import DayRow from "../../components/DayRow.astro";
 import Layout from "../../layouts/Layout.astro";
 import {
   addDefaultSlot,
-  clearWeeklyDefault,
   getWeeklyDefaults,
   removeDefaultSlot,
   setDefaultSlot,
+  setDefaultStatus,
 } from "../../lib/server/availability.ts";
 import { dayStatus, sortSlots } from "@muster/domain";
 import { refreshBoardsLater } from "../../lib/server/background.ts";
@@ -30,13 +30,14 @@ const WEEKDAYS = [
 if (Astro.request.method === "POST") {
   const form = await Astro.request.formData();
   const weekday = Number(form.get("weekday"));
+  const action = String(form.get("action") ?? "");
   const status = String(form.get("status") ?? "");
   try {
     const slot = Number(form.get("slot") ?? 0);
-    if (status === "clear") await clearWeeklyDefault(db, user.id, weekday);
-    else if (status === "add_slot") await addDefaultSlot(db, user, weekday);
-    else if (status === "remove_slot") await removeDefaultSlot(db, user, weekday, slot);
-    else {
+    if (action === "status") await setDefaultStatus(db, user, weekday, status);
+    else if (action === "add_slot") await addDefaultSlot(db, user, weekday);
+    else if (action === "remove_slot") await removeDefaultSlot(db, user, weekday, slot);
+    else if (action === "slot") {
       await setDefaultSlot(db, user, weekday, slot, {
         status,
         startLocal: String(form.get("start") ?? "") || null,
@@ -56,7 +57,7 @@ const defaults = await getWeeklyDefaults(db, user.id);
 
 <Layout title="Weekly defaults" active="schedule">
   <div class="page-head">
-    <p class="small"><a href="/app">← Schedule</a></p>
+    <p class="small"><a href="/app/schedule">← My schedule</a></p>
     <h1>Your usual week</h1>
     <p class="muted small">
       Defaults fill in every day you haven't answered, this week and next. Then you only change the exceptions.
@@ -77,6 +78,7 @@ const defaults = await getWeeklyDefaults(db, user.id);
           status={answers.length > 0 ? dayStatus(answers) : "unknown"}
           kind={answers.length > 0 ? "explicit" : "unknown"}
           slots={slots.map((s) => ({ status: s.status as "yes" | "maybe", start: s.startLocal, end: s.endLocal }))}
+          emptyLabel="No default"
         />
       );
     })}

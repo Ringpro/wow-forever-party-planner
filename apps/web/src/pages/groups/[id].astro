@@ -1,14 +1,22 @@
 ---
 import Layout from "../../layouts/Layout.astro";
-import { STATUS_ICON, dayLabel, timeIn } from "../../lib/format.ts";
+import { dayLabel, timeIn } from "../../lib/format.ts";
 import { groupWeek, planningWeeks } from "../../lib/server/availability.ts";
 import { refreshBoardsLater } from "../../lib/server/background.ts";
 import { getDb } from "../../lib/server/db.ts";
-import { CLASS_COLORS, describeCharacter } from "../../lib/server/characters.ts";
+import {
+  CLASS_COLORS,
+  CLASS_NAMES,
+  REALM_TYPE_NAMES,
+  ROLE_NAMES,
+  rolesOf,
+  type Role,
+} from "../../lib/server/characters.ts";
 import { guildRoles } from "../../lib/server/discord-sync.ts";
 import {
   createSquad,
   deleteSquad,
+  getGroupAsMember,
   getInviteToken,
   groupKind,
   leaveGroup,
@@ -47,8 +55,7 @@ if (Astro.request.method === "POST") {
     } else if (action === "delete_squad") {
       const parentId = await deleteSquad(db, user.id, groupId);
       return Astro.redirect(`/groups/${parentId}`);
-    }
-    else if (action === "leave") {
+    } else if (action === "leave") {
       await leaveGroup(db, user.id, groupId);
       refreshBoardsLater(Astro.locals, { groupIds: [groupId] });
       return Astro.redirect("/app");
@@ -69,9 +76,11 @@ if (!week) return new Response("Not found", { status: 404 });
 const { group, membership } = week;
 const isAdmin = membership.role === "admin";
 const kind = groupKind(group);
+const parent = group.parentGroupId ? await getGroupAsMember(db, user.id, group.parentGroupId) : null;
+const serverId = kind === "server" ? group.id : (parent?.group.id ?? null);
+const squads = serverId ? await listSquads(db, serverId) : [];
 const inviteUrl =
   isAdmin && kind === "private" ? `${Astro.url.origin}/join/${await getInviteToken(db, user.id, groupId)}` : null;
-const squads = kind === "server" ? await listSquads(db, group.id) : [];
 let roles: { id: string; name: string }[] = [];
 if (kind === "server" && isAdmin && group.discordGuildId) {
   roles = await guildRoles(group.discordGuildId).catch(() => []);
@@ -79,152 +88,218 @@ if (kind === "server" && isAdmin && group.discordGuildId) {
 const roleName = new Map(roles.map((r) => [r.id, r.name]));
 const zones = Intl.supportedValuesOf("timeZone");
 const today = weeks[0]!.days[0]!;
-const dow = (day: string) => dayLabel(day).slice(0, 3);
-const dom = (day: string) => String(Number(day.slice(8)));
-const span = (startsAt: number | null, endsAt: number | null) =>
-  startsAt === null ? "" : `${timeIn(startsAt, tz)}${endsAt !== null ? `–${timeIn(endsAt, tz)}` : ""}`;
+const time = (instant: number) => timeIn(instant, tz);
+
+// The party: levels, factions, realm types and roles of members' mains.
+const mains = week.members.flatMap((m) => {
+  const c = week.characters.get(m.userId);
+  return c ? [{ ...c, player: m.displayName }] : [];
+});
+const levels = mains.map((c) => c.level);
+const factions = ["horde", "alliance"].flatMap((f) => {
+  const n = mains.filter((c) => c.faction === f).length;
+  return n > 0 ? [`${n} ${f === "horde" ? "Horde" : "Alliance"}`] : [];
+});
+const realmTypes = [...new Set(mains.flatMap((c) => (c.realmType ? [REALM_TYPE_NAMES[c.realmType]] : [])))];
+const byRole = (role: Role) => mains.filter((c) => rolesOf(c).includes(role)).map((c) => c.player);
+const kindLabel = kind === "server" ? "Discord server" : kind === "squad" ? `Squad in ${parent?.group.name ?? "a server"}` : "Private group";
 ---
 
 <Layout title={group.name}>
-  <div class="page-head">
-    <p class="small"><a href="/app">← Schedule</a></p>
+  <div class="group-head">
     <div class="group-title">
-      {group.iconUrl ? <img class="server-icon" src={group.iconUrl} width="40" height="40" alt="" /> : null}
+      {group.iconUrl ? (
+        <img class="server-icon" src={group.iconUrl} width="52" height="52" alt="" />
+      ) : (
+        <span class="server-icon letter" aria-hidden="true">{group.name.slice(0, 1).toUpperCase()}</span>
+      )}
       <div>
         <h1>{group.name}</h1>
         <p class="muted small">
-          {kind === "server" ? "Discord server" : kind === "squad" ? "Squad" : "Private group"} ·
-          {" "}{week.members.length} {week.members.length === 1 ? "member" : "members"} · {group.minPlayers} needed to play ·
-          times in {tz.replaceAll("_", " ")}
+          {kindLabel} · {week.members.length} {week.members.length === 1 ? "member" : "members"} ·{" "}
+          {`${group.minPlayers} needed`}
         </p>
       </div>
     </div>
+    <nav class="tabs" aria-label="Week and squads">
+      <a href="?week=this" aria-current={weekKey === "this" ? "page" : undefined}>This week</a>
+      <a href="?week=next" aria-current={weekKey === "next" ? "page" : undefined}>Next week</a>
+      {serverId && kind === "squad" && <a href={`/groups/${serverId}`}>{parent?.group.name ?? "Server"}</a>}
+      {squads
+        .filter((s) => s.id !== group.id)
+        .map((s) => (
+          <a href={`/groups/${s.id}`}>{s.name}</a>
+        ))}
+    </nav>
   </div>
 
   <div id="flash">{error && <p class="error" role="alert">{error}</p>}</div>
 
   {!membership.shareAvailability && (
-    <p class="notice">You're not sharing your availability with this group, so you show as "no answer" here.</p>
+    <p class="notice">You're not sharing your schedule here, so you show as "no answer". Turn it on under You, below.</p>
   )}
 
   {week.freeNow.length > 0 && (
-    <div class="card free-now">
-      <span class="dot" aria-hidden="true"></span>
-      <div>
-        <strong>Free right now</strong>
-        <div class="small">{week.freeNow.map((f) => `${f.displayName} (until ${timeIn(f.until, tz)})`).join(", ")}</div>
-      </div>
+    <div class="free-strip">
+      <span class="pulse" aria-hidden="true"></span>
+      <span>
+        <strong>{week.freeNow.map((f) => f.displayName).join(", ")}</strong>{" "}
+        {week.freeNow.length === 1 ? "is" : "are"} free right now
+        {week.freeNow.length === 1 && ` until ${time(week.freeNow[0]!.until)}`}
+      </span>
     </div>
   )}
 
-  <nav class="tabs" aria-label="Week">
-    <a href="?week=this" aria-current={weekKey === "this" ? "page" : undefined}>This week</a>
-    <a href="?week=next" aria-current={weekKey === "next" ? "page" : undefined}>Next week</a>
-  </nav>
+  <div class="grid-box">
+    <div class="grid" style={`grid-template-columns: var(--name-col) repeat(${week.days.length}, minmax(96px, 1fr));`}>
+      <span></span>
+      {week.days.map((d) => (
+        <span class={`col-head${d.day === today ? " is-today" : ""}`}>
+          <strong>{d.day === today ? "Today" : dayLabel(d.day).slice(0, 3)}</strong> {Number(d.day.slice(8))}
+        </span>
+      ))}
 
-  <div class="group-days">
-    {week.days.map(({ day, members, counts, best }) => {
-      const answered = members.filter((m) => m.status !== "unknown");
-      const unanswered = members.filter((m) => m.status === "unknown");
-      return (
-        <article class={`gday${best && !best.includesMaybe ? " enough" : best ? " possible" : ""}`}>
-          <div class="day-date">
-            <span class="dow">{dow(day)}</span>
-            <span class="dom">{dom(day)}</span>
-            {day === today && <span class="badge">Today</span>}
-          </div>
-          <div class="gday-body">
-            <div class="gday-sum">
-              {best ? (
-                <span>
-                  <strong class="best-time">{timeIn(best.startsAt, tz)}</strong>
-                  <span class="muted">
-                    {" "}· {best.memberIds.length} can play{best.includesMaybe && " if the Maybes come"}
+      <span class="row-label">Best time</span>
+      {week.days.map((d) => (
+        <span class={`best ${d.best ? (d.best.includesMaybe ? "possible" : "enough") : "none"}`}>
+          <span class="best-time">{d.best ? time(d.best.startsAt) : "–"}</span>
+          <span class="small">
+            {d.best
+              ? `${d.best.memberIds.length} ${d.best.includesMaybe ? "with Maybes" : "can play"}`
+              : d.counts.yes + d.counts.maybe > 0
+                ? "not enough yet"
+                : "nobody yet"}
+          </span>
+        </span>
+      ))}
+
+      {week.members.map((m) => {
+        const c = week.characters.get(m.userId);
+        return (
+          <>
+            <span class="person">
+              <span class="class-dot" style={`--c:${c ? CLASS_COLORS[c.class] : "var(--surface-3)"}`} aria-hidden="true"></span>
+              <span class="person-text">
+                <strong>{m.displayName}</strong>
+                {c && (
+                  <span class="muted tiny">
+                    {c.name} · {CLASS_NAMES[c.class]} {c.level}
+                    {rolesOf(c).length > 0 && ` · ${rolesOf(c).map((r) => ROLE_NAMES[r]).join(", ")}`}
                   </span>
+                )}
+              </span>
+            </span>
+            {week.days.map((d) => {
+              const md = d.members.find((x) => x.userId === m.userId)!;
+              return (
+                <span class={`cell${d.day === today ? " is-today" : ""}${md.kind === "default" ? " is-default" : ""}`}>
+                  {md.status === "unknown" && <span class="lbl-none">No answer</span>}
+                  {md.status === "no" && <span class="lbl-no">Can't play</span>}
+                  {md.slots.map((s) => (
+                    <span class={`t-${s.status}`}>
+                      {s.status === "maybe" && "~ "}
+                      {time(s.startsAt)}–{time(s.endsAt)}
+                    </span>
+                  ))}
                 </span>
-              ) : (
-                <span class="muted">{counts.yes + counts.maybe === 0 ? "No one yet" : "Not enough players yet"}</span>
-              )}
-            </div>
-            {answered.length > 0 && (
-              <ul class="plain who">
-                {answered.map((m) => (
-                  <li
-                    class={`chip ${m.status}${m.kind === "default" ? " default" : ""}`}
-                    title={m.kind === "default" ? "Weekly default" : undefined}
-                  >
-                    {week.characters.get(m.userId) && (
-                      <span class="class-dot" style={`--c:${CLASS_COLORS[week.characters.get(m.userId)!.class]}`} aria-hidden="true"></span>
-                    )}
-                    {STATUS_ICON[m.status]} {m.displayName}
-                    {m.status !== "no" && m.slots.length > 0 && (
-                      <span class="t">{m.slots.map((s) => span(s.startsAt, s.endsAt)).join(", ")}</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-            {unanswered.length > 0 && (
-              <p class="muted small no-answer">No answer: {unanswered.map((m) => m.displayName).join(", ")}</p>
-            )}
-          </div>
-        </article>
-      );
-    })}
+              );
+            })}
+          </>
+        );
+      })}
+    </div>
   </div>
-  <p class="muted small legend">Dashed outline = from someone's weekly default.</p>
+  <p class="muted small legend">
+    <span><span class="class-dot" style="--c:var(--yes)"></span> Yes</span>
+    <span><span class="class-dot" style="--c:var(--maybe)"></span> Maybe</span>
+    <span>Dashed = from their weekly default</span>
+    <span>Times in {tz.replaceAll("_", " ")}</span>
+  </p>
 
-  <h2>Group settings</h2>
-  <div class="card stack">
-    <form method="post" class="setting-row">
-      <input type="hidden" name="action" value="share" />
-      <label class="check">
-        <input type="checkbox" name="share" checked={membership.shareAvailability} data-autosubmit />
-        Share my availability with this group
-      </label>
-      <noscript><button class="button secondary" type="submit">Save</button></noscript>
-    </form>
+  <div class="cards">
+    <section class="card">
+      <h2>The party</h2>
+      {mains.length === 0 ? (
+        <p class="muted small">Nobody has added a character yet. <a href="/app/characters">Add yours</a>.</p>
+      ) : (
+        <>
+          <p class="small">
+            Levels {Math.min(...levels)}{Math.max(...levels) !== Math.min(...levels) && ` to ${Math.max(...levels)}`}
+            {factions.length > 0 && ` · ${factions.join(", ")}`}
+            {realmTypes.length > 0 && ` · ${realmTypes.join(", ")}`}
+          </p>
+          <div class="role-list">
+            {(["tank", "healer", "dps"] as const).map((role) => (
+              <span class="role-chip">
+                <strong>{ROLE_NAMES[role]}:</strong> {byRole(role).join(", ") || "nobody yet"}
+              </span>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
 
-    {kind !== "private" && (
-      <p class="muted small" style="margin:0">
-        {kind === "server"
-          ? "Everyone in this Discord server who uses Muster is in this group. Admins are the people who can manage the server."
-          : `Everyone in the server with the ${roleName.get(group.discordRoleId ?? "") ?? "squad's"} role is in this squad. They show up after their next login or Discord command.`}
-      </p>
-    )}
-
-    {isAdmin && (
-      <form method="post" class="settings-form">
-        <input type="hidden" name="action" value="settings" />
-        <label>
-          Time zone <span class="muted small">(for the Discord board)</span>
-          <select name="timezone">
-            {zones.map((z) => <option value={z} selected={z === group.timezone}>{z.replaceAll("_", " ")}</option>)}
-          </select>
-        </label>
-        <label>
-          Players needed
-          <input name="minPlayers" type="number" min="1" max="40" value={group.minPlayers} />
-        </label>
-        <button class="button secondary" type="submit">Save</button>
-      </form>
-    )}
-
-    {kind === "server" && (
-      <div>
-        <h3>Squads</h3>
-        <p class="muted small">Smaller groups inside this server, like a raid team. Each follows a Discord role.</p>
-        {squads.length > 0 && (
+    {serverId && (
+      <section class="card">
+        <h2>Squads</h2>
+        {squads.length === 0 ? (
+          <p class="muted small">Smaller groups inside this server, like a raid team. Each follows a Discord role.</p>
+        ) : (
           <ul class="plain">
             {squads.map((s) => (
               <li class="list-row">
                 <a href={`/groups/${s.id}`}>{s.name}</a>
-                <span class="muted small">@{roleName.get(s.roleId ?? "") ?? "role"}</span>
+                {roleName.get(s.roleId ?? "") && <span class="muted small">@{roleName.get(s.roleId ?? "")}</span>}
               </li>
             ))}
           </ul>
         )}
-        {isAdmin && roles.length > 0 && (
+      </section>
+    )}
+
+    <section class="card">
+      <h2>You</h2>
+      <form method="post" class="setting-row">
+        <input type="hidden" name="action" value="share" />
+        <label class="check">
+          <input type="checkbox" name="share" checked={membership.shareAvailability} data-autosubmit />
+          Share my schedule here
+        </label>
+        <noscript><button class="button secondary" type="submit">Save</button></noscript>
+      </form>
+      <p class="muted small">
+        {kind === "server"
+          ? "You're in this group because you're in the Discord server."
+          : kind === "squad"
+            ? "You're in this squad because you have its Discord role."
+            : "You joined with an invite link."}
+      </p>
+    </section>
+  </div>
+
+  <details class="card settings">
+    <summary><h2>Group settings and members</h2></summary>
+    <div class="stack">
+      {isAdmin && (
+        <form method="post" class="settings-form">
+          <input type="hidden" name="action" value="settings" />
+          <label>
+            Time zone <span class="muted small">(for the Discord board)</span>
+            <select name="timezone">
+              {zones.map((z) => <option value={z} selected={z === group.timezone}>{z.replaceAll("_", " ")}</option>)}
+            </select>
+          </label>
+          <label>
+            Players needed
+            <input name="minPlayers" type="number" min="1" max="40" value={group.minPlayers} />
+          </label>
+          <button class="button secondary" type="submit">Save</button>
+        </form>
+      )}
+
+      {kind === "server" && isAdmin && roles.length > 0 && (
+        <div>
+          <h3>Add a squad</h3>
           <form method="post" class="squad-form">
             <input type="hidden" name="action" value="create_squad" />
             <input name="name" required maxlength="60" placeholder="Raid team" aria-label="Squad name" />
@@ -233,72 +308,64 @@ const span = (startsAt: number | null, endsAt: number | null) =>
             </select>
             <button class="button secondary" type="submit">Add squad</button>
           </form>
+          <p class="muted small">Members show up in a squad after their next login or Discord command.</p>
+        </div>
+      )}
+
+      {inviteUrl && (
+        <div>
+          <h3>Invite link</h3>
+          <p class="muted small">Anyone with this link can join. Reset it if it ends up somewhere it shouldn't.</p>
+          <div class="invite-row">
+            <input class="invite" readonly value={inviteUrl} data-select-on-click />
+            <button class="button secondary" type="button" data-copy={inviteUrl}>Copy</button>
+          </div>
+          <form method="post">
+            <input type="hidden" name="action" value="reset_invite" />
+            <button class="link small" type="submit">Reset link</button>
+          </form>
+        </div>
+      )}
+
+      <div>
+        <h3>Members</h3>
+        <ul class="plain">
+          {week.members.map((m) => (
+            <li class="list-row">
+              <span>{m.displayName}</span>
+              {m.role === "admin" ? (
+                <span class="muted small">Admin</span>
+              ) : isAdmin && kind === "private" ? (
+                <form method="post">
+                  <input type="hidden" name="action" value="make_admin" />
+                  <input type="hidden" name="memberId" value={m.userId} />
+                  <button class="link small" type="submit">Make admin</button>
+                </form>
+              ) : (
+                <span class="muted small">Member</span>
+              )}
+            </li>
+          ))}
+        </ul>
+        {kind !== "private" && (
+          <p class="muted small">Admins are the people who can manage the Discord server.</p>
         )}
       </div>
-    )}
 
-    {inviteUrl && (
-      <div>
-        <h3>Invite link</h3>
-        <p class="muted small">Anyone with this link can join. Reset it if it ends up somewhere it shouldn't.</p>
-        <div class="invite-row">
-          <input class="invite" readonly value={inviteUrl} data-select-on-click />
-          <button class="button secondary" type="button" data-copy={inviteUrl}>Copy</button>
-        </div>
+      {membership.source === "invite" && (
         <form method="post">
-          <input type="hidden" name="action" value="reset_invite" />
-          <button class="link small" type="submit">Reset link</button>
+          <input type="hidden" name="action" value="leave" />
+          <button class="button danger" type="submit">Leave group</button>
         </form>
-      </div>
-    )}
-
-    <div>
-      <h3>Members</h3>
-      <ul class="plain">
-        {week.members.map((m) => (
-          <li class="list-row">
-            <span class="member">
-              {week.characters.get(m.userId) ? (
-                <>
-                  <span class="class-dot" style={`--c:${CLASS_COLORS[week.characters.get(m.userId)!.class]}`} aria-hidden="true"></span>
-                  <span>
-                    {m.displayName}
-                    <span class="muted small"> · {week.characters.get(m.userId)!.name}, {describeCharacter(week.characters.get(m.userId)!)}</span>
-                  </span>
-                </>
-              ) : (
-                <span>{m.displayName}</span>
-              )}
-            </span>
-            {m.role === "admin" ? (
-              <span class="muted small">Admin</span>
-            ) : isAdmin && kind === "private" ? (
-              <form method="post">
-                <input type="hidden" name="action" value="make_admin" />
-                <input type="hidden" name="memberId" value={m.userId} />
-                <button class="link small" type="submit">Make admin</button>
-              </form>
-            ) : (
-              <span class="muted small">Member</span>
-            )}
-          </li>
-        ))}
-      </ul>
+      )}
+      {kind === "squad" && isAdmin && (
+        <form method="post">
+          <input type="hidden" name="action" value="delete_squad" />
+          <button class="button danger" type="submit">Delete squad</button>
+        </form>
+      )}
     </div>
-
-    {membership.source === "invite" && (
-      <form method="post">
-        <input type="hidden" name="action" value="leave" />
-        <button class="button danger" type="submit">Leave group</button>
-      </form>
-    )}
-    {kind === "squad" && isAdmin && (
-      <form method="post">
-        <input type="hidden" name="action" value="delete_squad" />
-        <button class="button danger" type="submit">Delete squad</button>
-      </form>
-    )}
-  </div>
+  </details>
 </Layout>
 
 <script>
@@ -318,103 +385,248 @@ const span = (startsAt: number | null, endsAt: number | null) =>
 </script>
 
 <style>
-  .free-now {
+  .group-head {
     display: flex;
+    justify-content: space-between;
     align-items: center;
-    gap: 12px;
-  }
-  .dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: var(--yes);
-    box-shadow: 0 0 0 4px var(--yes-soft);
-    flex: none;
-  }
-  .group-days {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    overflow: hidden;
-  }
-  .gday {
-    display: grid;
-    grid-template-columns: 52px 1fr;
-    gap: 12px;
-    padding: 14px 16px 14px 13px;
-    border-top: 1px solid var(--border);
-    border-left: 3px solid transparent;
-  }
-  .gday:first-child {
-    border-top: 0;
-  }
-  .gday.enough {
-    border-left-color: var(--yes);
-  }
-  .gday.possible {
-    border-left-color: var(--maybe);
-  }
-  .gday-body {
-    min-width: 0;
-  }
-  .gday-sum {
-    min-height: 28px;
-    display: flex;
-    align-items: center;
-  }
-  .best-time {
-    font-size: 1.15rem;
-    font-variant-numeric: tabular-nums;
-  }
-  .gday.enough .best-time {
-    color: var(--yes);
-  }
-  .gday.possible .best-time {
-    color: var(--maybe);
-  }
-  .who {
-    display: flex;
+    gap: 16px;
     flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 8px;
-  }
-  .who .t {
-    opacity: 0.85;
-    font-variant-numeric: tabular-nums;
-    margin-left: 2px;
-  }
-  .no-answer {
-    margin: 8px 0 0;
-  }
-  .legend {
-    margin-top: 8px;
-  }
-  .invite-row {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 8px;
-  }
-  .setting-row {
-    margin: 0;
-  }
-  .member {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .who .class-dot {
-    width: 8px;
-    height: 8px;
+    margin-bottom: 20px;
   }
   .group-title {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 14px;
+  }
+  .group-title h1 {
+    margin: 0;
+  }
+  .group-title p {
+    margin: 0;
   }
   .server-icon {
-    border-radius: 12px;
+    width: 52px;
+    height: 52px;
+    border-radius: 14px;
     flex: none;
+    object-fit: cover;
+  }
+  .server-icon.letter {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #a8322d;
+    color: #fff;
+    font-size: 22px;
+    font-weight: 700;
+  }
+  .tabs {
+    margin: 0;
+    flex-wrap: wrap;
+  }
+  .free-strip {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: 12px;
+    background: var(--yes-soft);
+    border: 1px solid rgba(59, 163, 107, 0.35);
+    margin-bottom: 16px;
+  }
+  .pulse {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--yes);
+    box-shadow: 0 0 0 4px rgba(59, 163, 107, 0.25);
+    flex: none;
+  }
+  .grid-box {
+    overflow-x: auto;
+    border-radius: var(--radius);
+    background: var(--surface);
+    border: 1px solid var(--border);
+  }
+  .grid {
+    --name-col: 210px;
+    display: grid;
+    gap: 6px;
+    padding: 16px;
+    min-width: max-content;
+  }
+  .grid > .person,
+  .grid > .row-label,
+  .grid > span:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--surface);
+    box-shadow: 8px 0 8px -8px rgba(0, 0, 0, 0.6);
+  }
+  @media (max-width: 640px) {
+    .grid {
+      --name-col: 118px;
+      padding: 10px;
+    }
+    .person .tiny {
+      display: none;
+    }
+  }
+  .col-head {
+    text-align: center;
+    padding: 4px 0;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .col-head.is-today {
+    color: var(--accent);
+  }
+  .row-label {
+    display: flex;
+    align-items: center;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .best {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 8px 4px;
+    border-radius: 8px;
+  }
+  .best-time {
+    font-size: 18px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .enough {
+    background: rgba(59, 163, 107, 0.18);
+    color: #7fd6a4;
+  }
+  .possible {
+    background: rgba(217, 166, 40, 0.16);
+    color: #f0c45a;
+  }
+  .none {
+    color: #6f6c78;
+  }
+  .person {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 0;
+  }
+  .person-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.3;
+    font-size: 14px;
+  }
+  .tiny {
+    font-size: 12px;
+  }
+  .cell {
+    min-height: 52px;
+    border-radius: 8px;
+    background: #20232c;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: center;
+    justify-content: center;
+  }
+  .cell.is-today {
+    box-shadow: inset 0 0 0 2px var(--accent);
+  }
+  .cell.is-default {
+    outline: 1px dashed #5a5f6d;
+    outline-offset: -3px;
+  }
+  .t-yes,
+  .t-maybe {
+    font-size: 13px;
+    font-weight: 600;
+    border-radius: 6px;
+    padding: 2px 7px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .t-yes {
+    color: #9be3b9;
+    background: rgba(59, 163, 107, 0.16);
+  }
+  .t-maybe {
+    color: #f5cf6e;
+    background: rgba(217, 166, 40, 0.16);
+  }
+  .lbl-no {
+    font-size: 12px;
+    color: #ef8f84;
+  }
+  .lbl-none {
+    font-size: 12px;
+    color: #6f6c78;
+  }
+  .legend {
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+  }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 14px;
+    margin-top: 8px;
+  }
+  .cards .card {
+    margin: 0;
+  }
+  .cards h2 {
+    margin: 0 0 10px;
+    font-size: 1rem;
+  }
+  .role-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .role-chip {
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: var(--surface-2);
+    font-size: 14px;
+  }
+  .setting-row {
+    margin: 0 0 8px;
+  }
+  .settings {
+    margin-top: 16px;
+  }
+  .settings summary {
+    cursor: pointer;
+    list-style: none;
+  }
+  .settings summary::-webkit-details-marker {
+    display: none;
+  }
+  .settings summary h2 {
+    display: inline;
+    margin: 0;
+    font-size: 1rem;
+  }
+  .settings summary::after {
+    content: " ▾";
+    color: var(--muted);
+  }
+  .settings[open] .stack {
+    margin-top: 16px;
   }
   .settings-form,
   .squad-form {
@@ -423,7 +635,9 @@ const span = (startsAt: number | null, endsAt: number | null) =>
     align-items: flex-end;
     gap: 12px;
   }
-  .squad-form {
-    margin-top: 12px;
+  .invite-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
   }
 </style>

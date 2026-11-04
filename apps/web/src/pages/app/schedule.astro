@@ -1,0 +1,126 @@
+---
+import DayRow from "../../components/DayRow.astro";
+import Layout from "../../layouts/Layout.astro";
+import { addDays } from "@muster/domain";
+import { dayLabel } from "../../lib/format.ts";
+import {
+  addSlot,
+  copyWeekForward,
+  myDays,
+  planningWeeks,
+  removeSlot,
+  setDayStatus,
+  setSlot,
+} from "../../lib/server/availability.ts";
+import { refreshBoardsLater } from "../../lib/server/background.ts";
+import { getDb } from "../../lib/server/db.ts";
+import { UserError } from "../../lib/server/users.ts";
+
+const user = Astro.locals.user!;
+const tz = user.timezone!;
+const db = getDb();
+let error: string | null = null;
+const copied = Astro.url.searchParams.get("copied");
+const notice =
+  copied === null
+    ? null
+    : copied === "0"
+      ? "Nothing to copy: next week already has answers for those days, or this week is empty."
+      : `Copied ${copied} ${copied === "1" ? "day" : "days"} to next week.`;
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  const action = String(form.get("action") ?? "");
+  const day = String(form.get("day") ?? "");
+  const slot = Number(form.get("slot") ?? 0);
+  try {
+    if (action === "copy_week") {
+      const count = await copyWeekForward(db, user);
+      refreshBoardsLater(Astro.locals, { userId: user.id });
+      return Astro.redirect(`/app/schedule?copied=${count}#week-next`);
+    }
+    if (action === "status") await setDayStatus(db, user, day, String(form.get("status") ?? ""), "web");
+    else if (action === "add_slot") await addSlot(db, user, day, "web");
+    else if (action === "remove_slot") await removeSlot(db, user, day, slot, "web");
+    else if (action === "slot") {
+      await setSlot(
+        db,
+        user,
+        day,
+        slot,
+        {
+          status: String(form.get("status") ?? ""),
+          startLocal: String(form.get("start") ?? "") || null,
+          endLocal: String(form.get("end") ?? "") || null,
+        },
+        "web",
+      );
+    }
+    refreshBoardsLater(Astro.locals, { userId: user.id });
+    return Astro.redirect(`/app/schedule#d-${day}`);
+  } catch (e) {
+    if (!(e instanceof UserError)) throw e;
+    error = e.message;
+  }
+}
+
+const weeks = planningWeeks(tz);
+const today = weeks[0]!.days[0]!;
+const answers = await myDays(db, user.id, weeks.flatMap((w) => w.days));
+const range = (monday: string) => `${dayLabel(monday).slice(4)} – ${dayLabel(addDays(monday, 6)).slice(4)}`;
+---
+
+<Layout title="My schedule" active="schedule">
+  <div class="page-head">
+    <h1>When can you play?</h1>
+    <p class="muted small">
+      Tap a day to change it, tap a time to edit it. Times in {tz.replaceAll("_", " ")}. Days you leave empty use your{" "}
+      <a href="/app/defaults">weekly defaults</a> (outlined).
+    </p>
+  </div>
+
+  <div id="flash">
+    {error && <p class="error" role="alert">{error}</p>}
+    {notice && <p class="notice">{notice}</p>}
+  </div>
+
+  {weeks.map((week) => (
+    <section id={`week-${week.key}`}>
+      <div class="week-head">
+        <h2>
+          {week.key === "this" ? "This week" : "Next week"} <span class="muted small">{range(week.monday)}</span>
+        </h2>
+        {week.key === "next" && (
+          <form method="post">
+            <button class="link small" name="action" value="copy_week">Copy this week</button>
+          </form>
+        )}
+      </div>
+      <div class="day-list">
+        {week.days.map((day) => {
+          const a = answers.get(day)!;
+          return (
+            <DayRow
+              id={`d-${day}`}
+              title={day === today ? "Today" : dayLabel(day).slice(0, 3)}
+              subtitle={String(Number(day.slice(8)))}
+              highlight={day === today}
+              hidden={{ day }}
+              status={a.kind === "unknown" ? "unknown" : a.status}
+              kind={a.kind}
+              slots={
+                a.kind === "unknown"
+                  ? []
+                  : a.slots.map((s) => ({ status: s.status as "yes" | "maybe", start: s.startLocal, end: s.endLocal }))
+              }
+            />
+          );
+        })}
+      </div>
+    </section>
+  ))}
+</Layout>
+
+<script>
+  import "../../scripts/rows.ts";
+</script>

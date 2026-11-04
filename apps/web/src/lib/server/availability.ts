@@ -35,6 +35,8 @@ const MAX_DAYS_AHEAD = 60;
 const MAX_SLOTS = 4;
 const DOUBLE_TAP_MS = 5_000;
 const NEW_SLOT_START: WallTime = "12:00";
+/** Start time used when someone says Yes/Maybe without picking one. */
+export const USUAL_START: WallTime = "20:30";
 
 export type Entry = typeof schema.availabilityEntries.$inferSelect;
 export type Source = Entry["source"];
@@ -182,16 +184,25 @@ export async function setSlot(
   await writeDay(db, user, day, slots, source);
 }
 
-/** Adds another Yes slot to a day, starting an hour after the last one ends unless a start is given. */
+/**
+ * Adds another slot to a day, starting an hour after the last one ends unless a start is given.
+ * Adding a start time the day already has just changes that slot's status.
+ */
 export async function addSlot(
   db: Db,
   user: SessionUser,
   dayInput: string,
   source: Source,
   startLocal?: WallTime,
+  status: "yes" | "maybe" = "yes",
 ): Promise<void> {
   const day = requireEditableDay(user, dayInput);
   const slots = await currentSlots(db, user, day);
+  const same = startLocal ? slots.find((s) => s.startLocal === startLocal) : undefined;
+  if (same) {
+    same.status = status;
+    return writeDay(db, user, day, slots, source);
+  }
   if (slots.length >= MAX_SLOTS) throw new UserError(`A day can have up to ${MAX_SLOTS} times.`);
   let start = startLocal ?? NEW_SLOT_START;
   if (!startLocal && slots.length > 0) {
@@ -199,8 +210,35 @@ export async function addSlot(
     const lastEnd = last.endLocal ?? addMinutesInGamingDay(last.startLocal, user.defaultSessionMinutes);
     start = (lastEnd && addMinutesInGamingDay(lastEnd, 60)) ?? NEW_SLOT_START;
   }
-  slots.push({ status: "yes", startLocal: start, endLocal: null });
+  slots.push({ status, startLocal: start, endLocal: null });
   await writeDay(db, user, day, slots, source);
+}
+
+/** The status the day's quick toggle moves to next: Yes → Maybe → No → not set → Yes. */
+export function nextStatus(current: Status | "unknown"): Status | "unknown" {
+  const order = ["yes", "maybe", "no", "unknown"] as const;
+  return order[(order.indexOf(current) + 1) % order.length]!;
+}
+
+/**
+ * Sets a day's overall answer from the quick toggle. Yes/Maybe keeps the day's times (or uses
+ * the usual start when it has none), No replaces them, "unknown" clears the day back to the default.
+ */
+export async function setDayStatus(
+  db: Db,
+  user: SessionUser,
+  dayInput: string,
+  status: string,
+  source: Source,
+): Promise<void> {
+  const day = requireEditableDay(user, dayInput);
+  if (status === "unknown") return clearAvailability(db, user.id, day);
+  if (status === "no") return writeDay(db, user, day, "no", source);
+  if (status !== "yes" && status !== "maybe") throw new UserError("Pick Yes, Maybe or No.");
+  const playing: "yes" | "maybe" = status;
+  const slots = await currentSlots(db, user, day);
+  const next = slots.length > 0 ? slots.map((s) => ({ ...s, status: playing })) : [{ status: playing, startLocal: USUAL_START, endLocal: null }];
+  await writeDay(db, user, day, next, source);
 }
 
 /** Removes one slot. Removing the only explicit slot clears the day (back to the default). */
@@ -350,6 +388,18 @@ export async function setDefaultSlot(
   if (Number.isInteger(index) && index >= 0 && index < slots.length) slots[index] = slot;
   else slots.push(slot);
   await writeDefault(db, user, day, slots);
+}
+
+/** The quick toggle for a weekday default; works like setDayStatus. */
+export async function setDefaultStatus(db: Db, user: SessionUser, weekday: number, status: string): Promise<void> {
+  const day = requireWeekday(weekday);
+  if (status === "unknown") return clearWeeklyDefault(db, user.id, day);
+  if (status === "no") return writeDefault(db, user, day, "no");
+  if (status !== "yes" && status !== "maybe") throw new UserError("Pick Yes, Maybe or No.");
+  const playing: "yes" | "maybe" = status;
+  const slots = await currentDefaultSlots(db, user.id, day);
+  const next = slots.length > 0 ? slots.map((s) => ({ ...s, status: playing })) : [{ status: playing, startLocal: USUAL_START, endLocal: null }];
+  await writeDefault(db, user, day, next);
 }
 
 export async function addDefaultSlot(db: Db, user: SessionUser, weekday: number): Promise<void> {

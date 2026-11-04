@@ -5,7 +5,9 @@
 async function save(row: HTMLElement, form: HTMLFormElement, data: FormData) {
   row.classList.add("saving");
   try {
-    const res = await fetch(form.action, { method: "POST", body: data });
+    // Not form.action: a field named "action" inside the form shadows that property.
+    const url = form.getAttribute("action") || location.pathname + location.search;
+    const res = await fetch(url, { method: "POST", body: data });
     const doc = new DOMParser().parseFromString(await res.text(), "text/html");
     const flash = document.getElementById("flash");
     const freshFlash = doc.getElementById("flash");
@@ -31,16 +33,15 @@ function bind(row: HTMLElement) {
       event.preventDefault();
       save(row, form, new FormData(form, event.submitter));
     });
-    // Changing a time on a slot you're playing saves right away; otherwise it waits for Yes/Maybe.
-    for (const select of form.querySelectorAll("select")) {
-      select.addEventListener("change", () => {
-        const status = form.dataset.status;
-        if (status !== "yes" && status !== "maybe") return;
-        const data = new FormData(form);
-        data.set("status", status);
-        save(row, form, data);
-      });
-    }
+  }
+  // Only one time editor open at a time.
+  for (const details of row.querySelectorAll("details")) {
+    details.addEventListener("toggle", () => {
+      if (!(details instanceof HTMLDetailsElement) || !details.open) return;
+      for (const other of document.querySelectorAll("details.slot[open]")) {
+        if (other !== details && other instanceof HTMLDetailsElement) other.open = false;
+      }
+    });
   }
 }
 

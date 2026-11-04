@@ -1,10 +1,17 @@
 ---
 interface Props {
   title: string;
-  active?: "schedule" | "characters" | "tools";
+  active?: "overview" | "schedule" | "characters" | "tools";
 }
 const { title, active } = Astro.props;
 const user = Astro.locals.user;
+const initials = user?.displayName
+  .split(/s+/)
+  .map((w) => w[0])
+  .join("")
+  .slice(0, 2)
+  .toUpperCase();
+const current = (key: Props["active"]) => (active === key ? "page" : undefined);
 ---
 
 <!doctype html>
@@ -16,22 +23,38 @@ const user = Astro.locals.user;
     <title>{title} · Muster</title>
     <link rel="icon" href="/muster.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Cinzel:wght@700&display=swap"
+      rel="stylesheet"
+    />
   </head>
-  <body>
+  <body class={user ? "signed-in" : undefined}>
     <header class="site-header">
       <div class="wrap header-inner">
         <a href={user ? "/app" : "/"} class="brand">
-          <img src="/muster.svg" width="28" height="28" alt="" />
+          <img src="/muster.svg" width="30" height="30" alt="" />
           <span>Muster</span>
         </a>
-        <nav>
-          {user && <a href="/app" aria-current={active === "schedule" ? "page" : undefined}>Schedule</a>}
-          {user && <a href="/app/characters" aria-current={active === "characters" ? "page" : undefined}>Characters</a>}
-          <a href="/get" aria-current={active === "tools" ? "page" : undefined}>Tools</a>
+        <nav class="top-nav" aria-label="Main">
+          {user && (
+            <>
+              <a href="/app" aria-current={current("overview")}>Overview</a>
+              <a href="/app/schedule" aria-current={current("schedule")}>My schedule</a>
+              <a href="/app/characters" aria-current={current("characters")}>Characters</a>
+            </>
+          )}
+          <a href="/get" aria-current={current("tools")}>Tools</a>
           {user ? (
-            <form method="post" action="/auth/logout">
-              <button class="link muted" type="submit">Log out</button>
-            </form>
+            <details class="account">
+              <summary aria-label={`Account: ${user.displayName}`}><span class="avatar">{initials}</span></summary>
+              <div class="account-menu">
+                <span class="muted small">{user.displayName}</span>
+                <a href="/onboarding?return_to=/app">Time zone</a>
+                <form method="post" action="/auth/logout"><button class="link" type="submit">Log out</button></form>
+              </div>
+            </details>
           ) : (
             <a href="/auth/discord">Log in</a>
           )}
@@ -41,6 +64,13 @@ const user = Astro.locals.user;
     <main class="wrap">
       <slot />
     </main>
+    {user && (
+      <nav class="tab-bar" aria-label="Main">
+        <a href="/app" aria-current={current("overview")}>Tonight</a>
+        <a href="/app/schedule" aria-current={current("schedule")}>My schedule</a>
+        <a href="/app/characters" aria-current={current("characters")}>Characters</a>
+      </nav>
+    )}
   </body>
 </html>
 
@@ -102,7 +132,7 @@ const user = Astro.locals.user;
     margin: 0;
     background: var(--bg);
     color: var(--text);
-    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font: 16px/1.5 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   }
   .wrap {
     max-width: 680px;
@@ -146,48 +176,119 @@ const user = Astro.locals.user;
     position: sticky;
     top: 0;
     z-index: 10;
-    background: color-mix(in srgb, var(--bg) 88%, transparent);
-    backdrop-filter: blur(8px);
+    background: #171a21;
     border-bottom: 1px solid var(--border);
   }
   .header-inner {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    height: 56px;
+    gap: 16px;
+    height: 60px;
   }
   .brand {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-weight: 700;
+    gap: 10px;
     color: var(--text);
     text-decoration: none;
+    font-family: Cinzel, Georgia, serif;
+    font-size: 20px;
+    letter-spacing: 0.04em;
   }
-  nav {
+  .top-nav {
     display: flex;
     align-items: center;
-    gap: 18px;
+    gap: 22px;
+    font-size: 15px;
   }
-  nav a {
+  .top-nav a {
     color: var(--muted);
     text-decoration: none;
     font-weight: 500;
+    padding: 4px 0;
   }
-  nav a[aria-current="page"],
-  nav a:hover {
+  .top-nav a[aria-current="page"] {
+    color: var(--text);
+    box-shadow: 0 2px 0 var(--accent);
+  }
+  .top-nav a:hover {
     color: var(--text);
   }
-  nav form {
+  .account {
+    position: relative;
+  }
+  .account summary {
+    list-style: none;
+    cursor: pointer;
+  }
+  .account summary::-webkit-details-marker {
+    display: none;
+  }
+  .avatar {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: #2b4a8a;
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .account-menu {
+    position: absolute;
+    right: 0;
+    top: 44px;
+    min-width: 180px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+    border-radius: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+  }
+  .account-menu form {
     margin: 0;
   }
-  @media (max-width: 480px) {
-    nav {
-      gap: 12px;
-      font-size: 0.9rem;
-    }
-    .brand span {
+  .tab-bar {
+    display: none;
+  }
+  @media (max-width: 640px) {
+    .top-nav > a:not([href="/get"]) {
       display: none;
+    }
+    .signed-in .top-nav > a[href="/get"] {
+      display: none;
+    }
+    .signed-in main.wrap {
+      padding-bottom: 96px;
+    }
+    .tab-bar {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 10;
+      background: #171a21;
+      border-top: 1px solid var(--border);
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    .tab-bar a {
+      padding: 14px 0 16px;
+      text-align: center;
+      font-size: 13px;
+      color: var(--muted);
+      text-decoration: none;
+    }
+    .tab-bar a[aria-current="page"] {
+      color: var(--accent);
+      font-weight: 600;
     }
   }
 

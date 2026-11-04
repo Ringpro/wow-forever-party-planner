@@ -7,7 +7,7 @@ import { boardMessage } from "../discord/views.ts";
 import { boardWeek } from "./availability.ts";
 import { sha256Hex } from "./crypto.ts";
 import { getGroupAsMember } from "./groups.ts";
-import { UserError } from "./users.ts";
+import { UserError, discordIdsFor } from "./users.ts";
 
 type Board = typeof schema.discordBoards.$inferSelect;
 
@@ -18,8 +18,10 @@ async function renderBoard(db: Db, groupId: string) {
     groupId,
     groupName: week.group.name,
     tz: week.group.timezone,
+    minPlayers: week.group.minPlayers,
     days: week.days,
     freeNow: week.freeNow,
+    mentions: await discordIdsFor(db, week.members.map((m) => m.userId)),
     websiteUrl: env.PUBLIC_BASE_URL,
   });
 }

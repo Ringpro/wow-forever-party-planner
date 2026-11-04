@@ -1,84 +1,98 @@
 ---
-// One editable day (or weekday default): No, or up to four Yes/Maybe time slots.
-// Each slot is a small form, so it works without JavaScript; scripts/rows.ts upgrades the row to
-// save in the background.
-import { DEFAULT_START, TIME_OPTIONS, timeOptionsWith } from "../lib/format.ts";
+// One day (or weekday default) as a slim row: a status pill you tap to cycle Yes → Maybe → No →
+// not set, a chip per time slot (tap to edit), and + for another time. Every control is a small
+// form, so it works without JavaScript; scripts/rows.ts saves in the background.
+import { nextStatus } from "../lib/server/availability.ts";
+import { TIME_OPTIONS, timeOptionsWith } from "../lib/format.ts";
 
 type Slot = { status: "yes" | "maybe"; start: string | null; end: string | null };
+type DayStatus = "yes" | "maybe" | "no" | "unknown";
 
 interface Props {
   id: string;
-  /** Short label on top, e.g. "Wed" or "Mon". */
+  /** Short label on top, e.g. "WED" or "Mon". */
   title: string;
   /** Large label below, e.g. "28". Optional. */
   subtitle?: string;
-  badge?: string;
+  highlight?: boolean;
   hidden: Record<string, string | number>;
-  /** The day as a whole. */
-  status: "yes" | "maybe" | "no" | "unknown";
+  status: DayStatus;
   kind: "explicit" | "default" | "unknown";
   slots: Slot[];
-  note?: string;
+  /** Shown on the pill when the day has no answer, e.g. "Not set". */
+  emptyLabel?: string;
 }
 
-const { id, title, subtitle, badge, hidden, status, kind, slots, note } = Astro.props;
+const { id, title, subtitle, highlight, hidden, status, kind, slots, emptyLabel = "Not set" } = Astro.props;
 const MAX_SLOTS = 4;
-// A day with no slots still shows one line: Yes/Maybe/No plus a start time to use.
-const lines: (Slot | null)[] = slots.length > 0 ? slots : [null];
+const LABELS: Record<DayStatus, string> = { yes: "Yes", maybe: "Maybe", no: "No", unknown: emptyLabel };
+const next = nextStatus(status);
+const playing = status === "yes" || status === "maybe";
+const nextLabel = next === "unknown" ? "clear it" : LABELS[next];
 ---
 
-<div class="day-row" id={id} data-row data-status={status} data-kind={kind}>
-  <div class="day-date">
+<div class={`day-row${kind === "default" ? " is-default" : ""}`} id={id} data-row>
+  <div class={`day-date${highlight ? " is-today" : ""}`}>
     <span class="dow">{title}</span>
     {subtitle && <span class="dom">{subtitle}</span>}
-    {badge && <span class="badge">{badge}</span>}
   </div>
-  <div class="day-main">
-    {lines.map((slot, i) => (
-      <form method="post" class="slot" data-slot data-status={slot?.status ?? (i === 0 ? status : "unknown")}>
-        {Object.entries(hidden).map(([name, value]) => <input type="hidden" name={name} value={value} />)}
-        <input type="hidden" name="slot" value={i} />
-        <div class="seg" role="group" aria-label={`Availability ${title} ${subtitle ?? ""}`}>
-          <button class="seg-btn yes" name="status" value="yes" aria-pressed={slot?.status === "yes" ? "true" : "false"}>Yes</button>
-          <button class="seg-btn maybe" name="status" value="maybe" aria-pressed={slot?.status === "maybe" ? "true" : "false"}>Maybe</button>
-          {i === 0 && (
-            <button class="seg-btn no" name="status" value="no" aria-pressed={status === "no" ? "true" : "false"}>No</button>
-          )}
-        </div>
-        <div class="day-times">
-          <select name="start" aria-label="Start time">
-            {timeOptionsWith(TIME_OPTIONS, slot?.start).map((t) => (
-              <option selected={t === (slot?.start ?? DEFAULT_START)}>{t}</option>
-            ))}
-          </select>
+
+  <form method="post" class="pill-form">
+    {Object.entries(hidden).map(([name, value]) => <input type="hidden" name={name} value={value} />)}
+    <input type="hidden" name="action" value="status" />
+    <button
+      class={`pill st-${status}`}
+      name="status"
+      value={next}
+      aria-label={`${title} ${subtitle ?? ""}: ${LABELS[status]}${kind === "default" ? " (weekly default)" : ""}. Tap for ${nextLabel}.`}
+    >
+      {LABELS[status]}
+    </button>
+  </form>
+
+  <div class="slots">
+    {slots.map((slot, i) => (
+      <details class="slot">
+        <summary class={`chip chip-${slot.status}`}>
+          {slot.status === "maybe" && <span aria-hidden="true">~ </span>}
+          {slot.start}–{slot.end ?? "late"}
+        </summary>
+        <form method="post" class="slot-editor">
+          {Object.entries(hidden).map(([name, value]) => <input type="hidden" name={name} value={value} />)}
+          <input type="hidden" name="slot" value={i} />
+          <fieldset class="seg">
+            <legend class="sr-only">Yes or Maybe</legend>
+            <label class="seg-opt"><input type="radio" name="status" value="yes" checked={slot.status === "yes"} /> Yes</label>
+            <label class="seg-opt"><input type="radio" name="status" value="maybe" checked={slot.status === "maybe"} /> Maybe</label>
+          </fieldset>
+          <label class="time">
+            <span class="sr-only">From</span>
+            <select name="start">
+              {timeOptionsWith(TIME_OPTIONS, slot.start).map((t) => <option selected={t === slot.start}>{t}</option>)}
+            </select>
+          </label>
           <span class="muted" aria-hidden="true">–</span>
-          <select name="end" aria-label="End time (optional)">
-            <option value="">late</option>
-            {timeOptionsWith(TIME_OPTIONS, slot?.end).map((t) => <option selected={t === slot?.end}>{t}</option>)}
-          </select>
-          {slot && (kind === "explicit" || slots.length > 1) && (
-            <button class="clear" name="status" value="remove_slot" title="Remove this time" aria-label="Remove this time">
-              ×
-            </button>
-          )}
-        </div>
-      </form>
+          <label class="time">
+            <span class="sr-only">Until</span>
+            <select name="end">
+              <option value="">late</option>
+              {timeOptionsWith(TIME_OPTIONS, slot.end).map((t) => <option selected={t === slot.end}>{t}</option>)}
+            </select>
+          </label>
+          <button class="button small-btn" name="action" value="slot">Save</button>
+          <button class="link small" name="action" value="remove_slot">Remove</button>
+        </form>
+      </details>
     ))}
-    <div class="day-actions">
-      {slots.length > 0 && slots.length < MAX_SLOTS && (
-        <form method="post">
-          {Object.entries(hidden).map(([name, value]) => <input type="hidden" name={name} value={value} />)}
-          <button class="link small" name="status" value="add_slot">+ Add another time</button>
-        </form>
-      )}
-      {kind === "explicit" && status === "no" && (
-        <form method="post">
-          {Object.entries(hidden).map(([name, value]) => <input type="hidden" name={name} value={value} />)}
-          <button class="link small" name="status" value="clear">Clear</button>
-        </form>
-      )}
-      {note && <span class="day-note">{note}</span>}
-    </div>
+    {playing && slots.length < MAX_SLOTS && (
+      <form method="post" class="add-form">
+        {Object.entries(hidden).map(([name, value]) => <input type="hidden" name={name} value={value} />)}
+        <button class="add" name="action" value="add_slot" aria-label={`Add another time on ${title} ${subtitle ?? ""}`}>+</button>
+      </form>
+    )}
+    {!playing && status === "unknown" && (
+      <span class="hint muted small">Tap to say when you can play</span>
+    )}
   </div>
   <span class="saved" aria-hidden="true">Saved</span>
 </div>
@@ -89,14 +103,14 @@ const lines: (Slot | null)[] = slots.length > 0 ? slots : [null];
     border: 1px solid var(--border);
     border-radius: var(--radius);
     box-shadow: var(--shadow);
-    overflow: hidden;
   }
   .day-row {
     position: relative;
     display: grid;
-    grid-template-columns: 52px 1fr;
+    grid-template-columns: 44px auto 1fr;
+    align-items: center;
     gap: 12px;
-    padding: 14px 16px;
+    padding: 10px 14px;
     border-top: 1px solid var(--border);
   }
   .day-row:first-child {
@@ -105,120 +119,170 @@ const lines: (Slot | null)[] = slots.length > 0 ? slots : [null];
   .day-row.saving {
     opacity: 0.6;
   }
-  .day-main {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    min-width: 0;
+  .day-date.is-today .dow {
+    color: var(--accent);
   }
-  .slot {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px 12px;
+  .day-date .dom {
+    font-size: 1.25rem;
+  }
+  .pill-form,
+  .add-form {
     margin: 0;
   }
-  .seg {
-    display: inline-flex;
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 3px;
-    gap: 3px;
-  }
-  .seg-btn {
+  .pill {
+    min-width: 78px;
     min-height: 38px;
-    min-width: 62px;
-    padding: 6px 10px;
+    padding: 0 12px;
+    border-radius: 999px;
     border: 0;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--muted);
     font-weight: 650;
+    font-size: 14px;
   }
-  .seg-btn:hover {
-    color: var(--text);
-    background: var(--surface-3);
-  }
-  .seg-btn.yes[aria-pressed="true"] {
+  .st-yes {
     background: var(--yes);
     color: #fff;
   }
-  .seg-btn.maybe[aria-pressed="true"] {
+  .st-maybe {
     background: var(--maybe);
     color: #1d1605;
   }
-  .seg-btn.no[aria-pressed="true"] {
-    background: var(--no);
-    color: #fff;
-  }
-  /* A weekly default: shown, but softer than an answer you gave for this day. */
-  [data-kind="default"] .seg-btn[aria-pressed="true"] {
-    background: transparent;
-    outline: 1.5px dashed currentColor;
-    outline-offset: -2px;
-  }
-  [data-kind="default"] .seg-btn.yes[aria-pressed="true"] {
-    color: var(--yes);
-  }
-  [data-kind="default"] .seg-btn.maybe[aria-pressed="true"] {
-    color: var(--maybe);
-  }
-  [data-kind="default"] .seg-btn.no[aria-pressed="true"] {
+  .st-no {
+    background: var(--no-soft);
     color: var(--no);
   }
-  .day-times {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .day-times select {
-    min-height: 40px;
-    padding: 6px 8px;
-    font-variant-numeric: tabular-nums;
-  }
-  .slot[data-status="no"] .day-times select,
-  .slot[data-status="unknown"] .day-times select {
-    color: var(--muted);
-  }
-  .slot[data-status="no"] .day-times {
-    opacity: 0.45;
-  }
-  .clear {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    border: 0;
+  .st-unknown {
     background: transparent;
     color: var(--muted);
-    font-size: 1.3rem;
-    line-height: 1;
+    box-shadow: inset 0 0 0 1px var(--surface-3);
   }
-  .clear:hover {
-    background: var(--surface-3);
-    color: var(--text);
+  /* From the weekly default: shown, but softer than an answer for this day. */
+  .is-default .pill.st-yes,
+  .is-default .pill.st-maybe,
+  .is-default .pill.st-no {
+    background: transparent;
+    box-shadow: inset 0 0 0 1.5px currentColor;
   }
-  .day-actions {
+  .is-default .pill.st-yes {
+    color: #7fd6a4;
+  }
+  .is-default .pill.st-maybe {
+    color: #f0c45a;
+  }
+  .slots {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 4px 16px;
+    justify-content: flex-end;
+    gap: 6px;
+    min-width: 0;
   }
-  .day-actions form {
-    margin: 0;
+  .slot {
+    position: relative;
   }
-  .day-actions:empty {
+  .slot summary {
+    list-style: none;
+    cursor: pointer;
+  }
+  .slot summary::-webkit-details-marker {
     display: none;
   }
-  .day-note {
-    font-size: 0.8rem;
+  .chip-yes,
+  .chip-maybe {
+    display: inline-flex;
+    align-items: center;
+    min-height: 34px;
+    padding: 0 10px;
+    border-radius: 8px;
+    background: var(--surface-2);
+    color: var(--text);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+  }
+  .chip-maybe {
+    box-shadow: inset 0 -2px 0 var(--maybe);
+  }
+  .slot[open] summary {
+    background: var(--surface-3);
+  }
+  .slot-editor {
+    position: absolute;
+    right: 0;
+    top: 42px;
+    z-index: 5;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    width: max-content;
+    max-width: min(340px, calc(100vw - 32px));
+    padding: 12px;
+    border-radius: 12px;
+    background: var(--surface);
+    border: 1px solid var(--surface-3);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+  }
+  .seg {
+    display: inline-flex;
+    gap: 3px;
+    padding: 3px;
+    margin: 0;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface-2);
+  }
+  .seg-opt {
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .seg-opt input {
+    accent-color: var(--accent);
+    margin: 0;
+  }
+  .time select {
+    min-height: 38px;
+    padding: 4px 8px;
+    font-variant-numeric: tabular-nums;
+  }
+  .small-btn {
+    min-height: 38px;
+    padding: 6px 14px;
+  }
+  .add {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    border: 1px dashed var(--surface-3);
+    background: transparent;
     color: var(--muted);
+    font-size: 18px;
+    line-height: 1;
+  }
+  .add:hover {
+    color: var(--text);
+    border-color: var(--muted);
+  }
+  .hint {
+    text-align: right;
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
   .saved {
     position: absolute;
-    top: 10px;
-    right: 14px;
-    font-size: 0.75rem;
+    top: 4px;
+    right: 10px;
+    font-size: 0.7rem;
     font-weight: 600;
     color: var(--yes);
     opacity: 0;
@@ -227,5 +291,10 @@ const lines: (Slot | null)[] = slots.length > 0 ? slots : [null];
   }
   .day-row.just-saved .saved {
     opacity: 1;
+  }
+  @media (max-width: 420px) {
+    .hint {
+      display: none;
+    }
   }
 </style>
