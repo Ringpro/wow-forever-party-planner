@@ -151,7 +151,7 @@ const kindLabel = kind === "server" ? "Discord server" : kind === "squad" ? `Squ
   )}
 
   <div class="grid-box">
-    <div class="grid" style={`grid-template-columns: var(--name-col) repeat(${week.days.length}, minmax(96px, 1fr));`}>
+    <div class="grid" style={`grid-template-columns: var(--name-col) repeat(${week.days.length}, minmax(0, 1fr));`}>
       <span></span>
       {week.days.map((d) => (
         <span class={`col-head${d.day === today ? " is-today" : ""}`}>
@@ -196,9 +196,9 @@ const kindLabel = kind === "server" ? "Discord server" : kind === "squad" ? `Squ
                   {md.status === "unknown" && <span class="lbl-none">No answer</span>}
                   {md.status === "no" && <span class="lbl-no">Can't play</span>}
                   {md.slots.map((s) => (
-                    <span class={`t-${s.status}`}>
-                      {s.status === "maybe" && "~ "}
-                      {time(s.startsAt)}–{time(s.endsAt)}
+                    <span class={`t-${s.status}`} title={`${s.status === "maybe" ? "Maybe" : "Yes"} ${time(s.startsAt)}–${time(s.endsAt)}`}>
+                      <strong>{s.status === "maybe" && "~"}{time(s.startsAt)}</strong>
+                      <span class="until">–{time(s.endsAt)}</span>
                     </span>
                   ))}
                 </span>
@@ -209,6 +209,58 @@ const kindLabel = kind === "server" ? "Discord server" : kind === "squad" ? `Squ
       })}
     </div>
   </div>
+  <div class="agenda">
+    {week.days.map((d) => {
+      const playing = d.members.filter((m) => m.status === "yes" || m.status === "maybe");
+      const out = d.members.filter((m) => m.status === "no").map((m) => m.displayName);
+      const unknown = d.members.filter((m) => m.status === "unknown").map((m) => m.displayName);
+      return (
+        <section class={`agenda-day${d.day === today ? " is-today" : ""}`}>
+          <div class="agenda-head">
+            <strong>{d.day === today ? "Today" : dayLabel(d.day)}</strong>
+            <span class={`agenda-best ${d.best ? (d.best.includesMaybe ? "possible" : "enough") : "none"}`}>
+              {d.best ? time(d.best.startsAt) : "–"}
+            </span>
+            <span class="muted small">
+              {d.best
+                ? `${d.best.memberIds.length} ${d.best.includesMaybe ? "with Maybes" : "can play"}`
+                : d.counts.yes + d.counts.maybe > 0
+                  ? "not enough yet"
+                  : "nobody yet"}
+            </span>
+          </div>
+          {playing.length > 0 && (
+            <ul class="agenda-people">
+              {playing.map((m) => {
+                const c = week.characters.get(m.userId);
+                return (
+                  <li>
+                    <span class="class-dot" style={`--c:${c ? CLASS_COLORS[c.class] : "var(--surface-3)"}`} aria-hidden="true"></span>
+                    <span class="agenda-name">{m.displayName}</span>
+                    <span class="agenda-times">
+                      {m.slots.map((s) => (
+                        <span class={`t-${s.status}`}>
+                          {s.status === "maybe" && "~"}
+                          {time(s.startsAt)}–{time(s.endsAt)}
+                        </span>
+                      ))}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {(out.length > 0 || unknown.length > 0) && (
+            <p class="muted small agenda-rest">
+              {out.length > 0 && <span>Can't play: {out.join(", ")}</span>}
+              {unknown.length > 0 && <span>No answer: {unknown.join(", ")}</span>}
+            </p>
+          )}
+        </section>
+      );
+    })}
+  </div>
+
   <p class="muted small legend">
     <span><span class="class-dot" style="--c:var(--yes)"></span> Yes</span>
     <span><span class="class-dot" style="--c:var(--maybe)"></span> Maybe</span>
@@ -443,35 +495,97 @@ const kindLabel = kind === "server" ? "Discord server" : kind === "squad" ? `Squ
     flex: none;
   }
   .grid-box {
-    overflow-x: auto;
     border-radius: var(--radius);
     background: var(--surface);
     border: 1px solid var(--border);
   }
   .grid {
-    --name-col: 210px;
+    --name-col: 190px;
     display: grid;
     gap: 6px;
     padding: 16px;
-    min-width: max-content;
   }
-  .grid > .person,
-  .grid > .row-label,
-  .grid > span:first-child {
-    position: sticky;
-    left: 0;
-    z-index: 1;
-    background: var(--surface);
-    box-shadow: 8px 0 8px -8px rgba(0, 0, 0, 0.6);
-  }
-  @media (max-width: 640px) {
+  @media (max-width: 900px) {
     .grid {
-      --name-col: 118px;
-      padding: 10px;
+      --name-col: 130px;
+      gap: 4px;
+      padding: 12px;
     }
     .person .tiny {
       display: none;
     }
+  }
+  /* Phones get the day-by-day list instead of the grid. */
+  .agenda {
+    display: none;
+  }
+  @media (max-width: 640px) {
+    .grid-box {
+      display: none;
+    }
+    .agenda {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+  }
+  .agenda-day {
+    border-radius: var(--radius);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 12px 14px;
+  }
+  .agenda-day.is-today {
+    border-color: var(--accent);
+  }
+  .agenda-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .agenda-head strong {
+    flex: 1;
+  }
+  .agenda-best {
+    font-size: 18px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    background: none;
+  }
+  .agenda-people {
+    list-style: none;
+    margin: 10px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .agenda-people li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+  }
+  .agenda-name {
+    flex: 1 1 80px;
+    min-width: 70px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+  .agenda-times {
+    margin-left: auto;
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  .agenda-rest {
+    display: flex;
+    flex-direction: column;
+    margin: 8px 0 0;
   }
   .col-head {
     text-align: center;
@@ -531,6 +645,7 @@ const kindLabel = kind === "server" ? "Discord server" : kind === "squad" ? `Squ
     font-size: 12px;
   }
   .cell {
+    min-width: 0;
     min-height: 52px;
     border-radius: 8px;
     background: #20232c;
@@ -556,6 +671,15 @@ const kindLabel = kind === "server" ? "Discord server" : kind === "squad" ? `Squ
     padding: 2px 7px;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
+    display: inline-flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 100%;
+  }
+  .t-yes .until,
+  .t-maybe .until {
+    font-weight: 500;
+    opacity: 0.75;
   }
   .t-yes {
     color: #9be3b9;

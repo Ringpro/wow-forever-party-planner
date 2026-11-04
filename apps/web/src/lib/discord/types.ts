@@ -38,9 +38,11 @@ export type Interaction = {
   };
 };
 
+export type Emoji = { name: string; id?: string };
+
 export type Button =
-  | { type: 2; style: 1 | 2 | 3 | 4; label: string; custom_id: string; disabled?: boolean }
-  | { type: 2; style: 5; label: string; url: string };
+  | { type: 2; style: 1 | 2 | 3 | 4; label: string; custom_id: string; disabled?: boolean; emoji?: Emoji }
+  | { type: 2; style: 5; label: string; url: string; emoji?: Emoji };
 
 export type StringSelect = {
   type: 3;
@@ -53,10 +55,20 @@ export type ActionRow = { type: 1; components: (Button | StringSelect)[] };
 
 export type Embed = { title?: string; description?: string; footer?: { text: string }; color?: number };
 
+// Components V2: a card (container) holding text, dividers, sections and button rows.
+// A message using them has the IS_COMPONENTS_V2 flag and no content or embeds.
+export const COMPONENTS_V2 = 1 << 15;
+export type TextDisplay = { type: 10; content: string };
+export type Separator = { type: 14; divider?: boolean; spacing?: 1 | 2 };
+export type Section = { type: 9; components: TextDisplay[]; accessory: Button };
+export type CardChild = TextDisplay | Separator | Section | ActionRow;
+export type Container = { type: 17; accent_color?: number; components: CardChild[] };
+export type Component = ActionRow | Container | TextDisplay | Separator | Section;
+
 export type MessagePayload = {
   content?: string;
   embeds?: Embed[];
-  components?: ActionRow[];
+  components?: Component[];
   flags?: number;
   allowed_mentions?: { parse: string[] };
 };
@@ -80,6 +92,39 @@ export function reply(data: MessagePayload): InteractionResponse {
 /** Replaces the message the component was on. */
 export function update(data: MessagePayload): InteractionResponse {
   return { type: ResponseType.UpdateMessage, data: { allowed_mentions: { parse: [] }, components: [], ...data } };
+}
+
+export const text = (content: string): TextDisplay => ({ type: 10, content });
+export const divider = (): Separator => ({ type: 14, divider: true, spacing: 1 });
+export const section = (content: string, accessory: Button): Section => ({
+  type: 9,
+  components: [text(content)],
+  accessory,
+});
+
+/** A Components V2 message: one card with an accent stripe. */
+export function card(children: CardChild[], accent = 0xe3b341): MessagePayload {
+  return { flags: COMPONENTS_V2, components: [{ type: 17, accent_color: accent, components: children }] };
+}
+
+/** Every component in a message, nested ones included (for tests and checks). */
+export function allComponents(m: MessagePayload): (Component | Button | StringSelect)[] {
+  const out: (Component | Button | StringSelect)[] = [];
+  const visit = (c: Component | Button | StringSelect) => {
+    out.push(c);
+    if ("components" in c) for (const child of c.components as (Component | Button | StringSelect)[]) visit(child);
+    if ("accessory" in c) visit(c.accessory);
+  };
+  for (const c of m.components ?? []) visit(c);
+  return out;
+}
+
+/** All the text a card shows, joined by newlines. */
+export function cardText(m: MessagePayload): string {
+  return allComponents(m)
+    .filter((c): c is TextDisplay => c.type === 10)
+    .map((c) => c.content)
+    .join("\n");
 }
 
 export function hasPermission(permissions: string | undefined, permission: bigint): boolean {

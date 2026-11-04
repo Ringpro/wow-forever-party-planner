@@ -94,10 +94,16 @@ async function refreshBoard(db: Db, board: Board): Promise<void> {
   let messageId = board.messageId;
   try {
     if (!messageId) throw new DiscordApiError(404, ErrorCode.UnknownMessage, "no message yet");
-    await editMessage(board.channelId, messageId, message);
+    // embeds: [] clears the old embed when an older board message is turned into a card.
+    await editMessage(board.channelId, messageId, { ...message, embeds: [] });
   } catch (e) {
     if (!(e instanceof DiscordApiError)) throw e;
-    if (e.code === ErrorCode.UnknownMessage) {
+    if (e.status === 400 && messageId) {
+      // Discord refused the edit (for example an old-style board it won't convert): replace it.
+      console.log(JSON.stringify({ event: "board_reposted", boardId: board.id, code: e.code, error: e.message }));
+      await deleteMessage(board.channelId, messageId).catch(() => {});
+      messageId = (await postMessage(board.channelId, message)).id;
+    } else if (e.code === ErrorCode.UnknownMessage) {
       // Someone deleted the board message: post a fresh one.
       messageId = (await postMessage(board.channelId, message)).id;
     } else if (e.code === ErrorCode.UnknownChannel || e.status === 403) {

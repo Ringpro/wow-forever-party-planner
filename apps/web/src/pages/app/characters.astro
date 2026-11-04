@@ -1,8 +1,7 @@
 ---
-import { WOW_CLASSES } from "@muster/db";
+import { ROLES, WOW_CLASSES } from "@muster/db";
 import Layout from "../../layouts/Layout.astro";
 import { refreshBoardsLater } from "../../lib/server/background.ts";
-import { ROLES } from "@muster/db";
 import {
   CLASS_COLORS,
   CLASS_NAMES,
@@ -21,6 +20,7 @@ import { UserError } from "../../lib/server/users.ts";
 const user = Astro.locals.user!;
 const db = getDb();
 let error: string | null = null;
+let submitted: FormData | null = null;
 
 if (Astro.request.method === "POST") {
   const form = await Astro.request.formData();
@@ -39,6 +39,7 @@ if (Astro.request.method === "POST") {
           isMain: true,
         });
       } else {
+        submitted = form;
         await saveCharacter(db, user.id, {
           id,
           name: String(form.get("name") ?? ""),
@@ -61,179 +62,537 @@ if (Astro.request.method === "POST") {
 
 const characters = await listCharacters(db, user.id);
 const editing = characters.find((c) => c.id === Astro.url.searchParams.get("edit"));
+
+// What the form shows: what was just submitted (after an error), else the character being edited.
+const value = {
+  name: submitted ? String(submitted.get("name") ?? "") : (editing?.name ?? ""),
+  level: submitted ? String(submitted.get("level") ?? "") : String(editing?.level ?? 1),
+  faction: submitted ? String(submitted.get("faction") ?? "") : (editing?.faction ?? ""),
+  class: submitted ? String(submitted.get("class") ?? "") : (editing?.class ?? ""),
+  roles: submitted ? submitted.getAll("roles").map(String) : editing ? rolesOf(editing) : [],
+  realmType: submitted ? String(submitted.get("realmType") ?? "") : (editing?.realmType ?? ""),
+  isMain: submitted ? submitted.get("isMain") === "on" : editing ? editing.isMain : characters.length === 0,
+};
+const formOpen = characters.length === 0 || Boolean(editing) || Boolean(error);
+const factionName = (f: string) => (f === "alliance" ? "Alliance" : "Horde");
 ---
 
 <Layout title="Characters" active="characters">
   <div class="page-head">
-    <h1>Your characters</h1>
-    <p class="muted small">
-      Your main shows next to your name in your groups. Update its level here or with <code>/level</code> in Discord.
-    </p>
+    <div>
+      <h1>Characters</h1>
+      <p class="muted">
+        Your main shows next to your name in your groups. Update its level here or with <code>/level</code> in Discord.
+      </p>
+    </div>
+    {characters.length > 0 && !editing && (
+      <a class="button" href="#form" data-open-form>Add character</a>
+    )}
   </div>
 
   <div id="flash">{error && <p class="error" role="alert">{error}</p>}</div>
 
   {characters.length > 0 && (
-    <div class="card">
-      <ul class="plain">
-        {characters.map((c) => (
-          <li class="list-row character">
-            <span class="who">
-              <span class="class-dot" style={`--c:${CLASS_COLORS[c.class]}`} aria-hidden="true"></span>
-              <span>
-                <strong>{c.name}</strong>
-                {c.isMain && <span class="chip yes">Main</span>}
-                <span class="muted small block">
-                  Level {c.level} {c.faction === "alliance" ? "Alliance" : "Horde"} {CLASS_NAMES[c.class]}
-                  {rolesOf(c).length > 0 && ` · ${rolesOf(c).map((r) => ROLE_NAMES[r]).join(", ")}`}
-                  {c.realmType && ` · ${REALM_TYPE_NAMES[c.realmType]} realm`}
-                </span>
+    <ul class="roster">
+      {characters.map((c) => (
+        <li class={`hero${c.isMain ? " is-main" : ""}${editing?.id === c.id ? " is-editing" : ""}`} style={`--c:${CLASS_COLORS[c.class]}`}>
+          <div class="hero-top">
+            <span class="crest" aria-hidden="true">{CLASS_NAMES[c.class].slice(0, 1)}</span>
+            <span class="hero-name">
+              <strong>{c.name}</strong>
+              <span class="muted small">
+                Level {c.level} {CLASS_NAMES[c.class]}
               </span>
             </span>
-            <span class="actions">
-              {!c.isMain && (
-                <form method="post">
-                  <input type="hidden" name="action" value="main" />
-                  <input type="hidden" name="id" value={c.id} />
-                  <button class="link small">Make main</button>
-                </form>
-              )}
-              <a class="small" href={`?edit=${c.id}#form`}>Edit</a>
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
+            {c.isMain && <span class="main-badge">Main</span>}
+          </div>
+          <div class="tags">
+            <span class={`tag faction-${c.faction}`}>{factionName(c.faction)}</span>
+            {rolesOf(c).map((r) => <span class={`tag role-${r}`}>{ROLE_NAMES[r]}</span>)}
+            {c.realmType && <span class="tag">{REALM_TYPE_NAMES[c.realmType]} realm</span>}
+          </div>
+          <div class="hero-actions">
+            <a class="button secondary small-button" href={`?edit=${c.id}#form`}>Edit</a>
+            {!c.isMain && (
+              <form method="post">
+                <input type="hidden" name="action" value="main" />
+                <input type="hidden" name="id" value={c.id} />
+                <button class="button secondary small-button">Make main</button>
+              </form>
+            )}
+          </div>
+        </li>
+      ))}
+    </ul>
   )}
 
-  <h2 id="form">{editing ? `Edit ${editing.name}` : characters.length === 0 ? "Add your first character" : "Add a character"}</h2>
-  <form method="post" class="card character-form">
-    {editing && <input type="hidden" name="id" value={editing.id} />}
-    <label>
-      Name
-      <input name="name" required minlength="2" maxlength="24" value={editing?.name ?? ""} placeholder="Thrallson" />
-    </label>
-    <label>
-      Realm type
-      <select name="realmType">
-        <option value="">Not set</option>
-        {Object.entries(REALM_TYPE_NAMES).map(([value, label]) => (
-          <option value={value} selected={editing?.realmType === value}>{label}</option>
-        ))}
-      </select>
-    </label>
-    <fieldset class="faction">
-      <legend>Faction</legend>
-      <label class="check"><input type="radio" name="faction" value="alliance" required checked={editing?.faction === "alliance"} /> Alliance</label>
-      <label class="check"><input type="radio" name="faction" value="horde" checked={editing?.faction === "horde"} /> Horde</label>
-    </fieldset>
-    <label>
-      Class
-      <select name="class" required data-class-roles={JSON.stringify(CLASS_ROLES)}>
-        {!editing && <option value="">Pick a class</option>}
-        {WOW_CLASSES.map((cls) => <option value={cls} selected={editing?.class === cls}>{CLASS_NAMES[cls]}</option>)}
-      </select>
-    </label>
-    <fieldset class="roles">
-      <legend>Roles</legend>
-      {ROLES.map((role) => (
-        <label class="check" data-role={role}>
-          <input type="checkbox" name="roles" value={role} checked={editing ? rolesOf(editing).includes(role) : false} />
-          {ROLE_NAMES[role]}
+  <details class="card form-card" id="form" open={formOpen}>
+    <summary>
+      <h2>{editing ? `Edit ${editing.name}` : characters.length === 0 ? "Add your first character" : "Add a character"}</h2>
+    </summary>
+    <form method="post" class="character-form">
+      {editing && <input type="hidden" name="id" value={editing.id} />}
+
+      <div class="row-2">
+        <label>
+          Name
+          <input name="name" required minlength="2" maxlength="24" value={value.name} placeholder="Thrallson" autocomplete="off" />
         </label>
-      ))}
-    </fieldset>
-    <label>
-      Level
-      <input name="level" type="number" min="1" max={MAX_LEVEL} required value={editing?.level ?? 1} />
-    </label>
-    <label class="check">
-      <input type="checkbox" name="isMain" checked={editing ? editing.isMain : characters.length === 0} /> My main character
-    </label>
-    <div class="form-buttons">
-      <button class="button" type="submit">{editing ? "Save" : "Add character"}</button>
-      {editing && <a class="button secondary" href="/app/characters">Cancel</a>}
-    </div>
-  </form>
-  {editing && (
-    <form method="post">
-      <input type="hidden" name="action" value="delete" />
-      <input type="hidden" name="id" value={editing.id} />
-      <button class="button danger" type="submit">Delete {editing.name}</button>
+        <label class="level">
+          Level
+          <input name="level" type="number" inputmode="numeric" min="1" max={MAX_LEVEL} required value={value.level} />
+        </label>
+      </div>
+
+      <fieldset>
+        <legend>Faction</legend>
+        <div class="factions">
+          {["alliance", "horde"].map((f, i) => (
+            <label class={`tile faction faction-${f}`}>
+              <input type="radio" name="faction" value={f} required={i === 0} checked={value.faction === f} />
+              <span>{factionName(f)}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Class</legend>
+        <div class="classes" data-class-roles={JSON.stringify(CLASS_ROLES)}>
+          {WOW_CLASSES.map((cls, i) => (
+            <label class="tile class-tile" style={`--c:${CLASS_COLORS[cls]}`}>
+              <input type="radio" name="class" value={cls} required={i === 0} checked={value.class === cls} />
+              <span class="class-dot" aria-hidden="true"></span>
+              <span>{CLASS_NAMES[cls]}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>
+          Roles <span class="muted small hint" data-roles-hint>Pick a class to see its roles</span>
+        </legend>
+        <div class="pills">
+          {ROLES.map((role) => (
+            <label class={`pill role-${role}`} data-role={role}>
+              <input type="checkbox" name="roles" value={role} checked={value.roles.includes(role)} />
+              <span>{ROLE_NAMES[role]}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Realm type</legend>
+        <div class="pills">
+          {[["", "Not set"], ...Object.entries(REALM_TYPE_NAMES)].map(([v, label]) => (
+            <label class="pill">
+              <input type="radio" name="realmType" value={v} checked={value.realmType === v} />
+              <span>{label}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+
+      <label class="switch">
+        <input type="checkbox" name="isMain" role="switch" checked={value.isMain} />
+        <span class="track" aria-hidden="true"></span>
+        <span>
+          Main character
+          <span class="muted small block">Shown next to your name in your groups</span>
+        </span>
+      </label>
+
+      <div class="form-buttons">
+        <button class="button" type="submit">{editing ? "Save changes" : "Add character"}</button>
+        {editing && <a class="button secondary" href="/app/characters">Cancel</a>}
+      </div>
     </form>
-  )}
+    {editing && (
+      <form method="post" class="delete-form">
+        <input type="hidden" name="action" value="delete" />
+        <input type="hidden" name="id" value={editing.id} />
+        <button class="link danger-link" type="submit">Delete {editing.name}</button>
+      </form>
+    )}
+  </details>
 </Layout>
 
 <script>
   // Only offer the roles the chosen class can play (the server checks too).
-  const classSelect = document.querySelector("select[data-class-roles]");
-  if (classSelect instanceof HTMLSelectElement) {
-    const classRoles = JSON.parse(classSelect.dataset.classRoles ?? "{}") as Record<string, string[]>;
+  const classes = document.querySelector("[data-class-roles]");
+  if (classes instanceof HTMLElement) {
+    const classRoles = JSON.parse(classes.dataset.classRoles ?? "{}") as Record<string, string[]>;
+    const hint = document.querySelector("[data-roles-hint]");
     const update = () => {
-      const allowed = classRoles[classSelect.value];
+      const chosen = classes.querySelector<HTMLInputElement>("input:checked")?.value ?? "";
+      const allowed = classRoles[chosen];
+      if (hint instanceof HTMLElement) hint.hidden = Boolean(allowed);
       for (const label of document.querySelectorAll("[data-role]")) {
         if (!(label instanceof HTMLElement)) continue;
-        const ok = !allowed || allowed.includes(label.dataset.role ?? "");
+        const ok = Boolean(allowed?.includes(label.dataset.role ?? ""));
         label.hidden = !ok;
         const box = label.querySelector("input");
         if (!box) continue;
         if (!ok) box.checked = false;
-        else if (allowed?.length === 1) box.checked = true;
+        else if (allowed?.length === 1) box.checked = true; // the only role it can play
       }
     };
-    classSelect.addEventListener("change", update);
+    classes.addEventListener("change", update);
     update();
   }
+
+  // "Add character" opens the form.
+  document.querySelector("[data-open-form]")?.addEventListener("click", () => {
+    const form = document.getElementById("form");
+    if (form instanceof HTMLDetailsElement) form.open = true;
+  });
 </script>
 
 <style>
-  .who {
+  .page-head {
     display: flex;
-    align-items: center;
-    gap: 10px;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+  .page-head h1 {
+    margin: 0 0 4px;
+  }
+  .page-head p {
+    margin: 0;
+    max-width: 60ch;
   }
   .block {
     display: block;
   }
-  .who .chip {
-    margin-left: 8px;
+
+  /* Roster */
+  .roster {
+    list-style: none;
+    margin: 0 0 24px;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 12px;
   }
-  .actions {
+  .hero {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    border-radius: var(--radius);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--c) 10%, var(--surface)), var(--surface) 60%);
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .hero::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 4px;
+    background: var(--c);
+  }
+  .hero.is-editing {
+    border-color: var(--accent);
+  }
+  .hero-top {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 12px;
   }
-  .actions form {
+  .crest {
+    width: 40px;
+    height: 40px;
+    flex: none;
+    border-radius: 10px;
+    display: grid;
+    place-items: center;
+    font-weight: 700;
+    font-size: 18px;
+    color: #15161b;
+    background: var(--c);
+  }
+  .hero-name {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+    line-height: 1.3;
+  }
+  .hero-name strong {
+    font-size: 17px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .main-badge {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--accent);
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    border-radius: 999px;
+    padding: 2px 9px;
+  }
+  .tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .tag {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    color: var(--muted);
+  }
+  .faction-alliance.tag {
+    background: rgba(63, 110, 214, 0.18);
+    color: #8fb0f5;
+  }
+  .faction-horde.tag {
+    background: rgba(196, 58, 50, 0.18);
+    color: #ef8f84;
+  }
+  .role-tank.tag {
+    color: #8fb0f5;
+  }
+  .role-healer.tag {
+    color: #7fd6a4;
+  }
+  .role-dps.tag {
+    color: #ef8f84;
+  }
+  .hero-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: auto;
+  }
+  .hero-actions form {
     margin: 0;
   }
-  .character-form {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 14px;
+  .small-button {
+    min-height: 34px;
+    padding: 6px 12px;
+    font-size: 14px;
   }
-  .faction,
-  .roles {
+
+  /* Form */
+  .form-card {
+    padding: 0;
+  }
+  .form-card > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 16px 20px;
+  }
+  .form-card > summary::-webkit-details-marker {
+    display: none;
+  }
+  .form-card > summary h2 {
+    margin: 0;
+    font-size: 18px;
+  }
+  .form-card[open] > summary {
+    border-bottom: 1px solid var(--border);
+  }
+  .character-form {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    padding: 20px;
+  }
+  .row-2 {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 110px;
+    gap: 12px;
+  }
+  fieldset {
     border: 0;
     padding: 0;
     margin: 0;
-    display: flex;
-    gap: 16px;
-    align-items: center;
-    flex-wrap: wrap;
+    min-width: 0;
   }
-  .faction legend,
-  .roles legend {
+  legend {
     font-weight: 500;
     padding: 0;
-    margin-bottom: 6px;
-    width: 100%;
+    margin-bottom: 8px;
   }
-  [data-role][hidden] {
+  .hint {
+    font-weight: 400;
+    margin-left: 6px;
+  }
+
+  /* Tiles and pills are labels around a visually hidden radio or checkbox. */
+  .tile,
+  .pill {
+    position: relative;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    transition:
+      border-color 0.12s,
+      background 0.12s;
+  }
+  .tile input,
+  .pill input {
+    position: absolute;
+    opacity: 0;
+    width: 1px;
+    height: 1px;
+    pointer-events: none;
+  }
+  .tile:has(input:focus-visible),
+  .pill:has(input:focus-visible) {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .tile:hover,
+  .pill:hover {
+    border-color: var(--muted);
+  }
+  .tile {
+    min-height: 48px;
+    padding: 10px 14px;
+    border-radius: 12px;
+  }
+  .factions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .faction {
+    justify-content: center;
+    font-size: 16px;
+    min-height: 56px;
+  }
+  .faction-alliance:has(input:checked) {
+    border-color: #3f6ed6;
+    background: rgba(63, 110, 214, 0.2);
+    color: #b5cbf8;
+  }
+  .faction-horde:has(input:checked) {
+    border-color: #c43a32;
+    background: rgba(196, 58, 50, 0.2);
+    color: #f5b0a8;
+  }
+  .classes {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .class-tile:has(input:checked) {
+    border-color: var(--c);
+    background: color-mix(in srgb, var(--c) 16%, var(--surface-2));
+  }
+  .pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .pill {
+    min-height: 40px;
+    padding: 8px 16px;
+    border-radius: 999px;
+    font-size: 14px;
+  }
+  .pill:has(input:checked) {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 16%, var(--surface-2));
+    color: var(--text);
+  }
+  .pill.role-tank:has(input:checked) {
+    border-color: #3f6ed6;
+    background: rgba(63, 110, 214, 0.2);
+  }
+  .pill.role-healer:has(input:checked) {
+    border-color: var(--yes);
+    background: var(--yes-soft);
+  }
+  .pill.role-dps:has(input:checked) {
+    border-color: var(--no);
+    background: var(--no-soft);
+  }
+  [data-role][hidden],
+  .hint[hidden] {
     display: none;
   }
+
+  /* Main character switch */
+  .switch {
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    position: relative;
+  }
+  .switch input {
+    position: absolute;
+    opacity: 0;
+    width: 1px;
+    height: 1px;
+  }
+  .track {
+    width: 44px;
+    height: 26px;
+    flex: none;
+    border-radius: 999px;
+    background: var(--surface-3);
+    position: relative;
+    transition: background 0.15s;
+  }
+  .track::after {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.15s;
+  }
+  .switch input:checked + .track {
+    background: var(--accent);
+  }
+  .switch input:checked + .track::after {
+    transform: translateX(18px);
+  }
+  .switch input:focus-visible + .track {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
   .form-buttons {
     display: flex;
     gap: 8px;
-    grid-column: 1 / -1;
+    flex-wrap: wrap;
+  }
+  .delete-form {
+    margin: 0;
+    padding: 0 20px 20px;
+  }
+  .danger-link {
+    color: var(--no);
+  }
+  @media (max-width: 640px) {
+    .row-2 {
+      grid-template-columns: minmax(0, 1fr) 90px;
+    }
+    .class-tile {
+      padding: 10px;
+      font-size: 14px;
+      gap: 6px;
+    }
   }
 </style>

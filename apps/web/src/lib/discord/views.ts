@@ -1,7 +1,19 @@
 // Pure renderers for Discord messages. No database or network access, so they're easy to test.
+// The planner, board and Who's on are Components V2 cards: text, dividers and buttons inside one
+// box with the gold accent stripe, matching the mockups.
 import { addMinutesInGamingDay, isoWeekday, type LocalDate, type Status, type WallTime } from "@muster/domain";
 import { DEFAULT_START, DISCORD_TIME_OPTIONS, dayLabel, timeIn, timeOptionsWith } from "../format.ts";
-import { row, type ActionRow, type Button, type MessagePayload } from "./types.ts";
+import EMOJI_IDS from "./emojis.json";
+import {
+  card,
+  divider,
+  row,
+  section,
+  text,
+  type Button,
+  type CardChild,
+  type MessagePayload,
+} from "./types.ts";
 
 /** A day as the user answered it: the day status plus its Yes/Maybe time slots. */
 type Answer = {
@@ -27,9 +39,20 @@ type DayView = {
 
 type FreeNowView = { displayName: string; until: number };
 
-const ICON = { yes: "✓", maybe: "~", no: "✗" } as const;
-const DOT = { yes: "🟢", maybe: "🟡", no: "🔴", unknown: "⚪" } as const;
-const ACCENT = 0xe3b341;
+type DotKind = Status | "unknown";
+const UNICODE_DOT = { yes: "🟢", maybe: "🟡", no: "🔴", unknown: "⚪" } as const;
+
+/**
+ * Dots for the board's day strips. The app's own small dot emojis when they've been uploaded
+ * (`pnpm discord:register` writes their ids to emojis.json), else the standard emoji circles.
+ */
+const CUSTOM_IDS = EMOJI_IDS as Partial<Record<DotKind, string>>;
+export const BOARD_DOT: Record<DotKind, string> = {
+  yes: CUSTOM_IDS.yes ? `<:mu_yes:${CUSTOM_IDS.yes}>` : UNICODE_DOT.yes,
+  maybe: CUSTOM_IDS.maybe ? `<:mu_maybe:${CUSTOM_IDS.maybe}>` : UNICODE_DOT.maybe,
+  no: CUSTOM_IDS.no ? `<:mu_no:${CUSTOM_IDS.no}>` : UNICODE_DOT.no,
+  unknown: CUSTOM_IDS.unknown ? `<:mu_unknown:${CUSTOM_IDS.unknown}>` : UNICODE_DOT.unknown,
+};
 const MAX_DOTS = 12;
 
 // ── custom_id helpers ────────────────────────────────────────────────────────────────
@@ -41,6 +64,7 @@ export function fromHhmm(value: string | undefined): WallTime | null {
 
 const shortDay = (day: LocalDate) => dayLabel(day).slice(0, 3);
 const dom = (day: LocalDate) => String(Number(day.slice(8)));
+const zoneName = (tz: string) => tz.split("/").pop()!.replaceAll("_", " ");
 
 function sharedLine(sharedWith: string[]): string {
   return sharedWith.length > 0
@@ -70,18 +94,13 @@ export type PlannerInput = {
   notice?: string;
 };
 
-function dayButtonLabel(day: LocalDate, answer: Answer | undefined, today: LocalDate, selected: boolean): string {
+function dayButtonLabel(day: LocalDate, answer: Answer | undefined, today: LocalDate): string {
   const name = day === today ? "Today" : `${shortDay(day)} ${dom(day)}`;
-  const detail = !answer
-    ? ""
-    : answer.status === "no"
-      ? " ✗"
-      : answer.slots.length > 1
-        ? ` · ${answer.slots.length} times`
-        : answer.slots[0]?.startLocal
-          ? ` · ${answer.status === "maybe" ? "~" : ""}${answer.slots[0].startLocal}`
-          : "";
-  return `${selected ? "▸ " : ""}${name}${detail}`;
+  if (!answer) return name;
+  if (answer.status === "no") return `${name} · No`;
+  if (answer.slots.length > 1) return `${name} · ${answer.slots.length} times`;
+  const start = answer.slots[0]?.startLocal;
+  return start ? `${name} · ${answer.status === "maybe" ? "~" : ""}${start}` : name;
 }
 
 /** Discord button colours for a day: green yes, blurple maybe, red no, grey not set. */
@@ -91,8 +110,8 @@ function dayButtonStyle(answer: Answer | undefined): 1 | 2 | 3 | 4 {
 }
 
 function slotText(s: Answer["slots"][number]): string {
-  const label = s.status === "maybe" ? "Maybe" : "Yes";
-  return `${ICON[s.status as "yes" | "maybe"]} ${label} ${s.startLocal}–${s.endLocal ?? "late"}`;
+  const maybe = s.status === "maybe";
+  return `${maybe ? UNICODE_DOT.maybe : UNICODE_DOT.yes} **${maybe ? "Maybe" : "Yes"}**  ${s.startLocal} – ${s.endLocal ?? "late"}`;
 }
 
 export function plannerMessage(input: PlannerInput): MessagePayload {
@@ -108,8 +127,10 @@ export function plannerMessage(input: PlannerInput): MessagePayload {
   const dayButtons: Button[] = shown.map((d) => ({
     type: 2,
     style: dayButtonStyle(entries.get(d)),
-    label: dayButtonLabel(d, entries.get(d), today, d === selectedDay),
+    label: dayButtonLabel(d, entries.get(d), today),
     custom_id: `pl:day:${d}`,
+    // The day being edited gets a pencil; Discord has no outline for buttons.
+    ...(d === selectedDay ? { emoji: { name: "✏️" } } : {}),
   }));
   if (nextWeek.length > 0) {
     dayButtons.push({
@@ -120,54 +141,47 @@ export function plannerMessage(input: PlannerInput): MessagePayload {
     });
   }
 
+  const short = selectedDay === today ? "today" : shortDay(selectedDay);
   const start = input.pendingStart;
   const actions: Button[] = [
-    { type: 2, style: 3, label: `+ Yes from ${start}`, custom_id: `pl:add:${selectedDay}:${hhmm(start)}:yes` },
+    { type: 2, style: 3, label: "+ Yes", custom_id: `pl:add:${selectedDay}:${hhmm(start)}:yes` },
     { type: 2, style: 1, label: "+ Maybe", custom_id: `pl:add:${selectedDay}:${hhmm(start)}:maybe` },
-    { type: 2, style: 4, label: "Can't play", custom_id: `pl:no:${selectedDay}` },
+    { type: 2, style: 4, label: `Can't play ${short}`, custom_id: `pl:no:${selectedDay}` },
   ];
   if (current && current.kind !== "default") {
-    actions.push({ type: 2, style: 2, label: "Clear", custom_id: `pl:clear:${selectedDay}` });
+    actions.push({ type: 2, style: 2, label: `Clear ${short}`, custom_id: `pl:clear:${selectedDay}` });
   }
-  const removers: Button[] =
-    current && current.status !== "no"
-      ? current.slots.map((s, i) => ({ type: 2, style: 2, label: `✕ ${s.startLocal}`, custom_id: `pl:rm:${selectedDay}:${i}` }))
-      : [];
 
-  const components: ActionRow[] = [
+  const dayTitle = [
+    `**${dayLabel(selectedDay)}**`,
+    ...(current?.kind === "default" ? ["-# From your weekly default. Changing it only changes this day."] : []),
+  ].join("\n");
+  const dayBody: CardChild[] = !current
+    ? [text("Not set yet. Pick a start time, then **+ Yes** or **+ Maybe**.")]
+    : current.status === "no"
+      ? [text(`${UNICODE_DOT.no} **Can't play**`)]
+      : current.slots.map((s, i) =>
+          section(slotText(s), { type: 2, style: 2, label: "Remove", custom_id: `pl:rm:${selectedDay}:${i}` }),
+        );
+
+  return card([
+    text(`### Your plans\n-# Tap a day to change it · ${zoneName(input.tz)} time`),
     row(...dayButtons.slice(0, 5)),
     ...(dayButtons.length > 5 ? [row(...dayButtons.slice(5, 10))] : []),
+    divider(),
+    text(dayTitle),
+    ...dayBody,
     row({
       type: 3,
       custom_id: `pl:start:${selectedDay}`,
-      placeholder: "Start time",
+      placeholder: "New time",
       options: timeOptionsWith(DISCORD_TIME_OPTIONS, start)
         .slice(-25)
         .map((t) => ({ label: `From ${t}`, value: hhmm(t), default: t === start })),
     }),
     row(...actions),
-    ...(removers.length > 0 ? [row(...removers)] : []),
-  ];
-
-  const dayLines = !current
-    ? ["Not set yet. Pick a start time, then **+ Yes** or **+ Maybe**."]
-    : current.status === "no"
-      ? ["✗ Can't play"]
-      : current.slots.map(slotText);
-  const defaultNote = current?.kind === "default" ? ["-# From your weekly default. Changing it only changes this day."] : [];
-
-  return {
-    content: [
-      `**Your plans** · times in ${input.tz.replaceAll("_", " ")}`,
-      "",
-      `**${dayLabel(selectedDay)}**`,
-      ...dayLines,
-      ...defaultNote,
-      ...(input.notice ? ["", input.notice] : []),
-      sharedLine(input.sharedWith),
-    ].join("\n"),
-    components,
-  };
+    text([...(input.notice ? [`✅ ${input.notice}`] : []), sharedLine(input.sharedWith)].join("\n")),
+  ]);
 }
 
 export function plannerStart(entry: Answer | undefined): WallTime {
@@ -204,19 +218,18 @@ export const COMMON_ZONES = [
   "UTC",
 ];
 
+/** A card too, so picking a zone can turn it into the planner card in place. */
 export function timezoneMessage(websiteUrl: string): MessagePayload {
-  return {
-    content: "First, which time zone are you in? Not listed? Set it on the website instead.",
-    components: [
-      row({
-        type: 3,
-        custom_id: "tz:set",
-        placeholder: "Your time zone",
-        options: COMMON_ZONES.map((z) => ({ label: z.replaceAll("_", " "), value: z })),
-      }),
-      row({ type: 2, style: 5, label: "Set on website", url: `${websiteUrl}/onboarding?return_to=/app` }),
-    ],
-  };
+  return card([
+    text("### Which time zone are you in?\n-# Not listed? Set it on the website instead."),
+    row({
+      type: 3,
+      custom_id: "tz:set",
+      placeholder: "Your time zone",
+      options: COMMON_ZONES.map((z) => ({ label: z.replaceAll("_", " "), value: z })),
+    }),
+    row({ type: 2, style: 5, label: "Set on website", url: `${websiteUrl}/onboarding?return_to=/app` }),
+  ]);
 }
 
 // ── /delay and "+30 min" ─────────────────────────────────────────────────────────────────
@@ -264,23 +277,25 @@ const ORDER = { yes: 0, maybe: 1, no: 2, unknown: 3 } as const;
 
 function dots(d: DayView): string {
   const sorted = [...d.members].sort((a, b) => ORDER[a.status] - ORDER[b.status]);
-  const shown = sorted.slice(0, MAX_DOTS).map((m) => DOT[m.status]).join("");
+  const shown = sorted.slice(0, MAX_DOTS).map((m) => BOARD_DOT[m.status]).join("");
   return sorted.length > MAX_DOTS ? `${shown} +${sorted.length - MAX_DOTS}` : shown;
 }
 
-function dayLine(d: DayView, tz: string, isToday: boolean, groupSize: number): string {
-  const name = isToday ? "**Today**" : `**${shortDay(d.day)} ${dom(d.day)}**`;
-  const time = d.best ? `\`${timeIn(d.best.startsAt, tz)}\`` : "`  –  `";
-  const note = d.best
-    ? d.best.includesMaybe
-      ? `${d.best.memberIds.length} with Maybes`
-      : d.best.memberIds.length >= 5
-        ? `${d.best.memberIds.length} of ${groupSize} · full party`
-        : `${d.best.memberIds.length} of ${groupSize}`
-    : d.counts.yes + d.counts.maybe > 0
-      ? "not enough yet"
-      : "nobody yet";
-  return `${name} ${time} ${dots(d)} ${note}`;
+function note(d: DayView, groupSize: number): string {
+  if (!d.best) return d.counts.yes + d.counts.maybe > 0 ? "not enough yet" : "nobody yet";
+  const n = d.best.memberIds.length;
+  if (d.best.includesMaybe) return `${n} with Maybes`;
+  return n >= 5 ? `${n} of ${groupSize} · full party` : `${n} of ${groupSize}`;
+}
+
+/**
+ * Day and best time in one fixed-width code chip, so the columns line up like a table:
+ * `Today   21:00`, `Fri 6  ~21:30` (~ = only with Maybes), `Sun 8     –  `.
+ */
+function dayChip(d: DayView, tz: string, isToday: boolean): string {
+  const name = (isToday ? "Today" : `${shortDay(d.day)} ${dom(d.day)}`).padEnd(6, " ");
+  const time = d.best ? `${d.best.includesMaybe ? "~" : " "}${timeIn(d.best.startsAt, tz)}` : "   –  ";
+  return `\`${name} ${time}\``;
 }
 
 export type BoardInput = {
@@ -295,49 +310,48 @@ export type BoardInput = {
   websiteUrl: string;
 };
 
+function freeNowLine(freeNow: FreeNowView[], tz: string): string {
+  const names = freeNow.map((f) => `**${f.displayName}**`);
+  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+  const until = freeNow.length === 1 ? `, until ${timeIn(freeNow[0]!.until, tz)}` : "";
+  return `${UNICODE_DOT.yes} ${list} ${freeNow.length === 1 ? "is" : "are"} free right now${until}`;
+}
+
 export function boardMessage(input: BoardInput): MessagePayload {
   const { tz, groupId } = input;
   const groupSize = input.days[0]?.members.length ?? 0;
   const lines: string[] = [];
-  if (input.freeNow.length > 0) {
-    lines.push(
-      `🟢 ${input.freeNow.map((f) => `**${f.displayName}** until ${timeIn(f.until, tz)}`).join(", ")} ${input.freeNow.length === 1 ? "is" : "are"} free right now`,
-      "",
-    );
-  }
   input.days.forEach((d, i) => {
-    lines.push(dayLine(d, tz, i === 0, groupSize));
+    lines.push(`${dayChip(d, tz, i === 0)}  ${dots(d)}  ${note(d, groupSize)}`);
     if (i === 0) {
       const playing = d.members.filter((m) => m.status === "yes" || m.status === "maybe");
-      if (playing.length > 0) lines.push(`-# ${playing.map((m) => who(m, tz, input.mentions)).join(" · ")}`);
+      if (playing.length > 0) lines.push(`> ${playing.map((m) => who(m, tz, input.mentions)).join("  ·  ")}`);
     }
   });
-  return {
-    content: "",
-    embeds: [
-      {
-        title: `${input.groupName} · this week`,
-        description: lines.join("\n"),
-        footer: {
-          text: `Earliest time ${input.minPlayers}+ can play · ${tz.replaceAll("_", " ")} time · Click a name to message them`,
-        },
-        color: ACCENT,
-      },
-    ],
-    components: [
-      row(
-        { type: 2, style: 1, label: "Plan my week", custom_id: `bd:plan:${groupId}` },
-        { type: 2, style: 3, label: "I'm free now", custom_id: `bd:free:${groupId}` },
-        { type: 2, style: 2, label: "+30 min", custom_id: `bd:delay:${groupId}` },
-        { type: 2, style: 2, label: "Who's on?", custom_id: `bd:who:${groupId}` },
-        { type: 2, style: 5, label: "Website", url: `${input.websiteUrl}/groups/${groupId}` },
-      ),
-    ],
-    allowed_mentions: { parse: [] },
-  };
+
+  const message = card([
+    text(
+      `### ${input.groupName} · this week\n-# Earliest time ${input.minPlayers} or more can play · ${zoneName(tz)} time`,
+    ),
+    ...(input.freeNow.length > 0 ? [text(freeNowLine(input.freeNow, tz))] : []),
+    divider(),
+    text(lines.join("\n")),
+    divider(),
+    row(
+      { type: 2, style: 1, label: "Plan my week", custom_id: `bd:plan:${groupId}` },
+      { type: 2, style: 3, label: "I'm free now", custom_id: `bd:free:${groupId}` },
+      { type: 2, style: 2, label: "+30 min", custom_id: `bd:delay:${groupId}` },
+      { type: 2, style: 2, label: "Who's on?", custom_id: `bd:who:${groupId}` },
+      { type: 2, style: 5, label: "Website", url: `${input.websiteUrl}/groups/${groupId}` },
+    ),
+    text(`-# Click a name to open their profile and message them. Nobody gets pinged. "Who's on?" shows any day.`),
+  ]);
+  return { ...message, allowed_mentions: { parse: [] } };
 }
 
 export type WhoInput = { groupName: string; day: DayView; freeNow: FreeNowView[] };
+
+const MAX_WHO_GROUPS = 10;
 
 /**
  * Who's playing on one day, per group, with clickable names. `pick` adds a day picker
@@ -349,28 +363,39 @@ export function whoMessage(
   mentions: Map<string, string> = new Map(),
   pick?: { customId: string; days: LocalDate[]; selected: LocalDate },
 ): MessagePayload {
-  if (groups.length === 0) {
-    return { content: "You're not in any group yet. Add Muster to your Discord server, or create a group on the website." };
-  }
-  const blocks = groups.map((g) => {
-    const playing = g.day.members.filter((m) => m.status === "yes" || m.status === "maybe");
-    const out = g.day.members.filter((m) => m.status === "no").map((m) => m.displayName);
-    const unknown = g.day.members.filter((m) => m.status === "unknown").map((m) => m.displayName);
-    const lines = [`__${g.groupName}__ · ${dayLine(g.day, tz, false, g.day.members.length).replace(/^\*\*[^*]+\*\* /, "")}`];
-    if (playing.length > 0) lines.push(playing.map((m) => who(m, tz, mentions)).join("\n"));
-    if (out.length > 0) lines.push(`-# Can't play: ${out.join(", ")}`);
-    if (unknown.length > 0) lines.push(`-# No answer: ${unknown.join(", ")}`);
-    if (g.freeNow.length > 0) {
-      lines.push(`🟢 Free now: ${g.freeNow.map((f) => `${f.displayName} (until ${timeIn(f.until, tz)})`).join(", ")}`);
-    }
-    return lines.join("\n");
-  });
-  const title = pick ? `**${dayLabel(pick.selected)}**` : "";
-  return {
-    content: [title, blocks.join("\n\n"), `-# Times in ${tz.replaceAll("_", " ")} · click a name to message them`]
-      .filter(Boolean)
-      .join("\n"),
-    components: pick
+  const title = !pick
+    ? "Who's on"
+    : pick.selected === pick.days[0]
+      ? "Who's on today"
+      : `Who's on ${dayLabel(pick.selected)}`;
+  const header = text(`### ${title}\n-# Times in ${tz.replaceAll("_", " ")} · click a name to message them`);
+
+  const blocks: CardChild[] =
+    groups.length === 0
+      ? [text("You're not in any group yet. Add Muster to your Discord server, or create a group on the website.")]
+      : groups.slice(0, MAX_WHO_GROUPS).flatMap((g) => {
+          const d = g.day;
+          const playing = d.members.filter((m) => m.status === "yes" || m.status === "maybe");
+          const out = d.members.filter((m) => m.status === "no").map((m) => m.displayName);
+          const unknown = d.members.filter((m) => m.status === "unknown").map((m) => m.displayName);
+          const best = d.best
+            ? `starts \`${timeIn(d.best.startsAt, tz)}\` · ${note(d, d.members.length)}`
+            : note(d, d.members.length);
+          const lines = [`**${g.groupName}** · ${best}`];
+          lines.push(playing.length > 0 ? playing.map((m) => who(m, tz, mentions)).join("  ·  ") : "Nobody has said yes yet.");
+          const small = [
+            ...(out.length > 0 ? [`Can't play: ${out.join(", ")}`] : []),
+            ...(unknown.length > 0 ? [`No answer: ${unknown.join(", ")}`] : []),
+          ];
+          if (small.length > 0) lines.push(`-# ${small.join(" · ")}`);
+          if (g.freeNow.length > 0) lines.push(freeNowLine(g.freeNow, tz));
+          return [divider(), text(lines.join("\n"))];
+        });
+
+  const message = card([
+    header,
+    ...blocks,
+    ...(pick && groups.length > 0
       ? [
           row({
             type: 3,
@@ -383,7 +408,7 @@ export function whoMessage(
             })),
           }),
         ]
-      : [],
-    allowed_mentions: { parse: [] },
-  };
+      : []),
+  ]);
+  return { ...message, allowed_mentions: { parse: [] } };
 }

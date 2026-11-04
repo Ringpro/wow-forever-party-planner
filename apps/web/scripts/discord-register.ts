@@ -1,9 +1,12 @@
 // Registers slash commands and install settings with Discord.
 //   pnpm discord:register                       commands + install settings
 //   pnpm discord:register --endpoint <url>      also sets the Interactions Endpoint URL
+// Also uploads the board's dot emojis to the app (once) and writes their ids to
+// src/lib/discord/emojis.json, which is committed: emoji ids aren't secret. Rebuild after.
 // Reads DISCORD_CLIENT_ID from wrangler.jsonc and DISCORD_BOT_TOKEN from .dev.vars (or the environment).
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { COMMANDS } from "../src/lib/discord/commands.ts";
+import { DOT_COLOURS, dotPng } from "./dot-emoji.ts";
 
 const API = "https://discord.com/api/v10";
 const BOT_PERMISSIONS = "2147503104"; // keep in sync with src/lib/discord/install.ts
@@ -36,7 +39,7 @@ if (!token || !clientId) {
   process.exit(1);
 }
 
-async function call(method: string, path: string, body: unknown) {
+async function call(method: string, path: string, body?: unknown) {
   const res = await fetch(`${API}${path}`, {
     method,
     headers: { authorization: `Bot ${token}`, "content-type": "application/json" },
@@ -64,3 +67,23 @@ if (endpoint) settings.interactions_endpoint_url = `${endpoint.replace(/\/$/, ""
 const app = (await call("PATCH", "/applications/@me", settings)) as { interactions_endpoint_url?: string };
 console.log("Install settings updated (server install includes the bot).");
 if (endpoint) console.log(`Interactions endpoint: ${app.interactions_endpoint_url}`);
+
+// Board dots as app emojis. Existing ones are kept, so ids stay stable.
+type AppEmoji = { id: string; name: string };
+const existing = ((await call("GET", `/applications/${clientId}/emojis`)) as { items: AppEmoji[] }).items;
+const ids: Record<string, string> = {};
+for (const [kind, colour] of Object.entries(DOT_COLOURS)) {
+  const name = `mu_${kind}`;
+  const found = existing.find((e) => e.name === name);
+  ids[kind] = found
+    ? found.id
+    : ((await call("POST", `/applications/${clientId}/emojis`, {
+        name,
+        image: `data:image/png;base64,${dotPng(colour).toString("base64")}`,
+      })) as AppEmoji).id;
+}
+const emojiFile = new URL("../src/lib/discord/emojis.json", import.meta.url);
+const before = readFileSync(emojiFile, "utf8");
+const after = `${JSON.stringify(ids, null, 2)}\n`;
+if (before !== after) writeFileSync(emojiFile, after);
+console.log(`Board dot emojis: ${Object.keys(ids).join(", ")}${before !== after ? " (ids saved, rebuild to use them)" : ""}`);

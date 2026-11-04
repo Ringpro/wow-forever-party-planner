@@ -5,29 +5,310 @@ import { serverInstallUrl, userInstallUrl } from "../lib/discord/install.ts";
 
 const clientId = env.DISCORD_CLIENT_ID;
 const configured = clientId.length > 0;
+const user = Astro.locals.user;
+
+const commands = [
+  { name: "/avail", detail: "Plan your week with buttons: times, Maybes and days you can't play." },
+  { name: "/play now", detail: "Tell your groups you're free right now, for 2 hours or as long as you say." },
+  { name: "/delay", detail: "Running late: push today's start 30 minutes (or more) later." },
+  { name: "/who", detail: "Who's playing today or tomorrow, with names you can click to message." },
+  { name: "/level", detail: "Ding! Set your main's new level." },
+  { name: "/board setup", detail: "Post a live board in a channel. It updates itself when plans change." },
+];
 ---
 
-<Layout title="Get the tools" active="tools">
-  <h1>Get the tools</h1>
-  <p class="muted">Everything is optional. The website works on its own.</p>
+<Layout title="Tools" active="tools">
+  <div class="page-head">
+    <h1>Tools</h1>
+    <p class="muted">Muster works on the website alone. These bring it to where your group already hangs out.</p>
+  </div>
 
-  <section class="card">
-    <h2>Discord app</h2>
-    <p><strong>Add to my account</strong> lets you use <code>/avail</code>, <code>/play now</code> and <code>/delay</code> in any server or DM. No admin rights needed.</p>
-    <a class="button discord" href={configured ? userInstallUrl(clientId) : undefined} aria-disabled={!configured}>Add to my account</a>
+  <section class="card tool">
+    <header class="tool-head">
+      <span class="tool-icon discord-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="26" height="26"><path fill="currentColor" d="M19.3 5.3A16.6 16.6 0 0 0 15.2 4l-.5 1a15.4 15.4 0 0 0-5.4 0l-.5-1a16.5 16.5 0 0 0-4.1 1.3C2.1 9.2 1.4 13 1.7 16.7a16.7 16.7 0 0 0 5 2.5l1.1-1.7a10.8 10.8 0 0 1-1.7-.8l.4-.3a11.9 11.9 0 0 0 11 0l.4.3c-.5.3-1.1.6-1.7.8l1.1 1.7a16.6 16.6 0 0 0 5-2.5c.4-4.3-.7-8-2.9-11.4ZM8.5 14.5c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2Zm7 0c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2Z"/></svg>
+      </span>
+      <div>
+        <h2>Discord app</h2>
+        <p class="muted small">Plan, check who's on and say you're running late without leaving Discord.</p>
+      </div>
+    </header>
 
-    <p><strong>Add to my server</strong> posts your group's availability board in a channel. Needs Manage Server.</p>
-    <a class="button discord" href={configured ? serverInstallUrl(clientId) : undefined} aria-disabled={!configured}>Add to my server</a>
+    <div class="options">
+      <div class="option">
+        <span class="eyebrow">For you</span>
+        <h3>Add to my account</h3>
+        <ul class="ticks">
+          <li>Use the commands in any server or DM</li>
+          <li>Only you see your planner</li>
+          <li>No admin rights needed</li>
+        </ul>
+        <a class="button discord" href={configured ? userInstallUrl(clientId) : undefined} aria-disabled={!configured}>
+          Add to my account
+        </a>
+      </div>
+      <div class="option">
+        <span class="eyebrow">For your server</span>
+        <h3>Add to my server</h3>
+        <ul class="ticks">
+          <li>The server becomes a group everyone can share with</li>
+          <li>Discord roles become squads</li>
+          <li>A live board in the channel you pick</li>
+        </ul>
+        <a class="button discord" href={configured ? serverInstallUrl(clientId) : undefined} aria-disabled={!configured}>
+          Add to my server
+        </a>
+      </div>
+    </div>
 
-    <p class="muted">
-      The bot asks for: View Channels, Send Messages, Embed Links and Use Application Commands, so it can post and
-      update the board. It never reads your messages.
+    <details class="commands">
+      <summary>What the commands do</summary>
+      <dl>
+        {commands.map((c) => (
+          <div>
+            <dt><code>{c.name}</code></dt>
+            <dd>{c.detail}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
+
+    <p class="muted tiny fine-print">
+      Adding Muster to a server needs Manage Server. The bot asks for View Channels, Send Messages, Embed Links and Use Application Commands, so it can post and update
+      the board. It never reads your messages, and mentions on the board never ping anyone.
     </p>
-    {!configured && <p class="muted">Install links appear once <code>DISCORD_CLIENT_ID</code> is set.</p>}
+    {!configured && <p class="muted small">Install links appear once <code>DISCORD_CLIENT_ID</code> is set.</p>}
   </section>
 
-  <section class="card">
-    <h2>WoW addon</h2>
-    <p class="muted">Coming later.</p>
-  </section>
+  <div class="pair">
+    <section class="card tool">
+      <header class="tool-head">
+        <span class="tool-icon addon-icon" aria-hidden="true">
+          <img src="/muster-icon.svg" width="30" height="30" alt="" />
+        </span>
+        <div>
+          <h2>WoW addon <span class="soon">Coming soon</span></h2>
+          <p class="muted small">Type <code>/muster</code> in game.</p>
+        </div>
+      </header>
+      <ul class="ticks">
+        <li>See your party's levels and classes</li>
+        <li>Find the quests you share, so you can do them together</li>
+        <li>Only shared with party members who run it too</li>
+      </ul>
+      <p class="muted small">Being tested on the live client. The download goes here when it's ready.</p>
+    </section>
+
+    {user ? (
+      <section class="card tool">
+        <header class="tool-head">
+          <span class="tool-icon web-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="3" /><path d="M3 10h18M8 3v4M16 3v4" /></svg>
+          </span>
+          <div>
+            <h2>On the website</h2>
+            <p class="muted small">Settings that save you clicks every week.</p>
+          </div>
+        </header>
+        <ul class="links">
+          <li>
+            <a href="/app/defaults">Weekly defaults</a>
+            <span class="muted small">Your usual evenings, filled in automatically</span>
+          </li>
+          <li>
+            <a href="/onboarding?return_to=/get">Time zone</a>
+            <span class="muted small">{user.timezone?.replaceAll("_", " ") ?? "Not set yet"}</span>
+          </li>
+          <li>
+            <a href="/groups/new">Private group</a>
+            <span class="muted small">For friends who aren't in one Discord server</span>
+          </li>
+        </ul>
+      </section>
+    ) : (
+      <section class="card tool">
+        <header class="tool-head">
+          <span class="tool-icon web-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="3" /><path d="M3 10h18M8 3v4M16 3v4" /></svg>
+          </span>
+          <div>
+            <h2>The website</h2>
+            <p class="muted small">Plan two weeks ahead and see every group at once.</p>
+          </div>
+        </header>
+        <a class="button" href="/auth/discord">Log in with Discord</a>
+      </section>
+    )}
+  </div>
 </Layout>
+
+<style>
+  .page-head {
+    margin-bottom: 20px;
+  }
+  .page-head h1 {
+    margin: 0 0 4px;
+  }
+  .page-head p {
+    margin: 0;
+  }
+  .tool {
+    padding: 20px;
+  }
+  .tool-head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+  .tool-head h2 {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .tool-head p {
+    margin: 2px 0 0;
+  }
+  .tool-icon {
+    width: 48px;
+    height: 48px;
+    flex: none;
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+  }
+  .discord-icon {
+    background: #5865f2;
+    color: #fff;
+  }
+  .addon-icon {
+    background: #1b2030;
+    border: 1px solid var(--border);
+  }
+  .web-icon {
+    background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));
+    color: var(--accent);
+  }
+  .options {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 12px;
+  }
+  .option {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+    border-radius: 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+  }
+  .option h3 {
+    margin: 0;
+    font-size: 17px;
+  }
+  .option .button {
+    margin-top: auto;
+  }
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .ticks {
+    list-style: none;
+    margin: 0 0 4px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 14px;
+  }
+  .ticks li {
+    display: flex;
+    gap: 8px;
+  }
+  .ticks li::before {
+    content: "✓";
+    color: var(--yes);
+    font-weight: 700;
+  }
+  .tiny {
+    font-size: 12px;
+  }
+  .commands {
+    margin-top: 16px;
+    border-top: 1px solid var(--border);
+    padding-top: 14px;
+  }
+  .commands summary {
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .commands dl {
+    margin: 12px 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .commands dl > div {
+    display: grid;
+    grid-template-columns: 130px minmax(0, 1fr);
+    gap: 12px;
+    font-size: 14px;
+  }
+  .commands dd {
+    margin: 0;
+    color: var(--muted);
+  }
+  @media (max-width: 520px) {
+    .commands dl > div {
+      grid-template-columns: 1fr;
+      gap: 2px;
+    }
+  }
+  .fine-print {
+    margin: 14px 0 0;
+  }
+  .pair {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+  }
+  .pair .card {
+    margin: 0;
+  }
+  .soon {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: var(--maybe-soft);
+    color: var(--maybe);
+  }
+  .links {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .links li {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 10px 0;
+    border-top: 1px solid var(--border);
+  }
+  .links li:first-child {
+    border-top: 0;
+    padding-top: 0;
+  }
+  .links a {
+    font-weight: 600;
+  }
+</style>

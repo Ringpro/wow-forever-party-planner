@@ -1,12 +1,13 @@
 ---
 // Overview: tonight and the next two weeks across all your servers, squads and groups.
 import Layout from "../layouts/Layout.astro";
-import { HOUR } from "@muster/domain";
+import { HOUR, addDays } from "@muster/domain";
 import { dayLabel, timeIn } from "../lib/format.ts";
 import {
   groupWeek,
   myDays,
   planningDays,
+  planningWeeks,
   setFreeNow,
   shiftToday,
   type GroupWeek,
@@ -61,6 +62,14 @@ const weeks = (await Promise.all(groups.map((g) => groupWeek(db, user, g.id, day
   (w): w is GroupWeek => w !== null,
 );
 const mine = await myDays(db, user.id, days);
+// The grid shows one calendar week at a time, Monday to Sunday, so it always fits the screen.
+// Days before today are greyed out.
+const calendarWeeks = planningWeeks(tz).map((w) => ({
+  key: w.key,
+  cols: Array.from({ length: 7 }, (_, i) => addDays(w.monday, i)),
+  range: `${dayLabel(w.monday).slice(4)} – ${dayLabel(addDays(w.monday, 6)).slice(4)}`,
+}));
+const groupDay = new Map(weeks.map((w) => [w.group.id, new Map(w.days.map((gd) => [gd.day, gd]))]));
 const kindOf = new Map(groups.map((g) => [g.id, g.kind]));
 
 const freeNow = [
@@ -195,74 +204,91 @@ const tonight = weeks.map((w) => {
         </div>
       </section>
 
-      <section>
+      <section class="weeks">
         <div class="section-head">
-          <h2>Next two weeks</h2>
-          <div class="legend muted small">
-            <span><span class="class-dot" style="--c:var(--yes)"></span> Enough players</span>
-            <span><span class="class-dot" style="--c:var(--maybe)"></span> If the Maybes come</span>
-            <span>Dashed = your weekly default</span>
+          <h2>Your groups</h2>
+          <div class="seg" role="radiogroup" aria-label="Week">
+            {calendarWeeks.map((cw, i) => (
+              <label>
+                <input type="radio" name="week" value={cw.key} checked={i === 0} />
+                <span>{cw.key === "this" ? "This week" : "Next week"}</span>
+              </label>
+            ))}
           </div>
         </div>
-        <div class="grid-box">
-          <div class="grid" style={`grid-template-columns: var(--name-col) repeat(${days.length}, minmax(58px, 1fr));`}>
-            <span></span>
-            {days.map((d) => (
-              <span class={`col-head${d === today ? " is-today" : ""}`}>
-                <strong>{dow(d)}</strong>
-                <span>{dom(d)}</span>
+        {calendarWeeks.map((cw) => (
+          <div class={`grid-box week-${cw.key}`}>
+            <div class="grid">
+              <span class="corner muted small">{cw.range}</span>
+              {cw.cols.map((d) => (
+                <span class={`col-head${d === today ? " is-today" : ""}${d < today ? " is-past" : ""}`}>
+                  <strong>{dow(d)}</strong>
+                  <span>{dom(d)}</span>
+                </span>
+              ))}
+
+              <span class="row-name">
+                <span class="g-icon letter small me">{iconLetter(user.displayName)}</span>
+                <span>You<span class="muted tiny">Your answers</span></span>
               </span>
-            ))}
-
-            <span class="row-name">
-              <span class="g-icon letter small me">{iconLetter(user.displayName)}</span>
-              <span>You<span class="muted tiny">Your answers</span></span>
-            </span>
-            {days.map((d) => {
-              const a = mine.get(d)!;
-              const status = a.kind === "unknown" ? "unknown" : a.status;
-              const first = a.kind === "unknown" ? null : a.slots[0];
-              const more = a.kind === "unknown" ? 0 : a.slots.length - 1;
-              return (
-                <a
-                  href={`/app/schedule#d-${d}`}
-                  class={`cell me-${status}${a.kind === "default" ? " me-default" : ""}${d === today ? " is-today" : ""}`}
-                >
-                  <span class="t">{status === "no" ? "No" : first?.startLocal ?? "?"}</span>
-                  <span>{more > 0 ? `+${more} more` : status === "maybe" ? "Maybe" : status === "yes" ? "Yes" : ""}</span>
-                </a>
-              );
-            })}
-
-            {weeks.map((w) => (
-              <>
-                <a class={`row-name${kindOf.get(w.group.id) === "squad" ? " squad" : ""}`} href={`/groups/${w.group.id}`}>
-                  {w.group.iconUrl ? (
-                    <img class="g-icon small" src={w.group.iconUrl} width="22" height="22" alt="" />
-                  ) : (
-                    <span class="g-icon letter small">{iconLetter(w.group.name)}</span>
-                  )}
-                  <span>
-                    {w.group.name}
-                    <span class="muted tiny">
-                      {w.members.length} {w.members.length === 1 ? "member" : "members"}
-                    </span>
-                  </span>
-                </a>
-                {w.days.map((gd) => (
+              {cw.cols.map((d) => {
+                const a = mine.get(d);
+                if (!a) return <span class="cell past" aria-hidden="true"></span>;
+                const status = a.kind === "unknown" ? "unknown" : a.status;
+                const first = a.kind === "unknown" ? null : a.slots[0];
+                const more = a.kind === "unknown" ? 0 : a.slots.length - 1;
+                return (
                   <a
-                    href={`/groups/${w.group.id}`}
-                    class={`cell ${gd.best ? (gd.best.includesMaybe ? "possible" : "enough") : "none"}${gd.day === today ? " is-today" : ""}`}
+                    href={`/app/schedule#d-${d}`}
+                    class={`cell me-${status}${a.kind === "default" ? " me-default" : ""}${d === today ? " is-today" : ""}`}
+                    title={`${dayLabel(d)}: ${status === "unknown" ? "not set" : status}`}
                   >
-                    <span class="t">{gd.best ? timeIn(gd.best.startsAt, tz) : "–"}</span>
-                    <span>{gd.best ? `${gd.best.memberIds.length}/${w.members.length}` : ""}</span>
+                    <span class="t">{status === "no" ? "No" : first?.startLocal ?? "?"}</span>
+                    <span class="sub">{more > 0 ? `+${more}` : status === "maybe" ? "Maybe" : ""}</span>
                   </a>
-                ))}
-              </>
-            ))}
+                );
+              })}
+
+              {weeks.map((w) => (
+                <>
+                  <a class={`row-name${kindOf.get(w.group.id) === "squad" ? " squad" : ""}`} href={`/groups/${w.group.id}`}>
+                    {w.group.iconUrl ? (
+                      <img class="g-icon small" src={w.group.iconUrl} width="22" height="22" alt="" />
+                    ) : (
+                      <span class="g-icon letter small">{iconLetter(w.group.name)}</span>
+                    )}
+                    <span>
+                      {w.group.name}
+                      <span class="muted tiny">
+                        {w.members.length} {w.members.length === 1 ? "member" : "members"}
+                      </span>
+                    </span>
+                  </a>
+                  {cw.cols.map((d) => {
+                    const gd = groupDay.get(w.group.id)?.get(d);
+                    if (!gd) return <span class="cell past" aria-hidden="true"></span>;
+                    return (
+                      <a
+                        href={`/groups/${w.group.id}${cw.key === "next" ? "?week=next" : ""}`}
+                        class={`cell ${gd.best ? (gd.best.includesMaybe ? "possible" : "enough") : "none"}${d === today ? " is-today" : ""}`}
+                        title={`${w.group.name}, ${dayLabel(d)}`}
+                      >
+                        <span class="t">{gd.best ? timeIn(gd.best.startsAt, tz) : "–"}</span>
+                        <span class="sub">{gd.best ? `${gd.best.memberIds.length}/${w.members.length}` : ""}</span>
+                      </a>
+                    );
+                  })}
+                </>
+              ))}
+            </div>
           </div>
+        ))}
+        <div class="legend muted small">
+          <span><span class="class-dot" style="--c:var(--yes)"></span> Enough players</span>
+          <span><span class="class-dot" style="--c:var(--maybe)"></span> If the Maybes come</span>
+          <span>Dashed = your weekly default</span>
         </div>
-        <p class="muted small">Each cell is the earliest time enough people overlap. Open a server for who and when.</p>
+        <p class="muted small">Each cell is the earliest time enough people overlap. Open a group for who and when.</p>
       </section>
     </>
   )}
@@ -456,43 +482,101 @@ const tonight = weeks.map((w) => {
     display: flex;
     gap: 16px;
     flex-wrap: wrap;
+    margin: 10px 0 4px;
+  }
+  .section-head h2,
+  .section-head .seg {
     margin: 32px 0 12px;
   }
+  /* This week / Next week toggle without JavaScript: the checked radio picks which grid shows. */
+  .seg {
+    display: inline-flex;
+    padding: 3px;
+    border-radius: 10px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+  }
+  .seg label {
+    position: relative;
+  }
+  .seg input {
+    position: absolute;
+    opacity: 0;
+    inset: 0;
+    margin: 0;
+    cursor: pointer;
+  }
+  .seg span {
+    display: block;
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--muted);
+  }
+  .seg input:checked + span {
+    background: var(--surface-3);
+    color: var(--text);
+  }
+  .seg input:focus-visible + span {
+    outline: 2px solid var(--accent);
+  }
+  .weeks:has(input[value="this"]:checked) .week-next,
+  .weeks:has(input[value="next"]:checked) .week-this {
+    display: none;
+  }
   .grid-box {
-    overflow-x: auto;
     border-radius: var(--radius);
     background: var(--surface);
     border: 1px solid var(--border);
-    margin-bottom: 8px;
   }
   .grid {
-    --name-col: 170px;
     display: grid;
+    grid-template-columns: 180px repeat(7, minmax(0, 1fr));
     gap: 6px;
     padding: 14px;
-    min-width: max-content;
     align-items: center;
   }
-  .grid > .row-name,
-  .grid > span:first-child {
-    position: sticky;
-    left: 0;
-    z-index: 1;
-    align-self: stretch;
-    background: var(--surface);
-    box-shadow: 8px 0 8px -8px rgba(0, 0, 0, 0.6);
+  .corner {
+    align-self: end;
+    padding-bottom: 2px;
   }
   @media (max-width: 640px) {
+    /* Phones: the name sits on its own line above its row, so all seven days fit across. */
     .grid {
-      --name-col: 104px;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      gap: 4px;
       padding: 10px;
     }
-    .row-name {
-      font-size: 13px;
-      overflow: hidden;
-    }
-    .row-name .g-icon {
+    .corner {
       display: none;
+    }
+    .grid .row-name {
+      grid-column: 1 / -1;
+      margin-top: 8px;
+      font-size: 13px;
+    }
+    .grid .row-name .g-icon {
+      width: 18px;
+      height: 18px;
+      font-size: 10px;
+    }
+    .grid .row-name > span:last-child {
+      flex-direction: row;
+      gap: 8px;
+      align-items: baseline;
+    }
+    .grid .row-name.squad {
+      padding-left: 0;
+    }
+    .grid .cell {
+      height: 44px;
+    }
+    .grid .cell .t {
+      font-size: 12px;
+    }
+    .grid .cell .sub {
+      font-size: 10px;
     }
     .legend {
       gap: 4px 14px;
@@ -508,6 +592,12 @@ const tonight = weeks.map((w) => {
   }
   .col-head.is-today {
     color: var(--accent);
+  }
+  .col-head.is-past {
+    opacity: 0.4;
+  }
+  .cell.past {
+    background: repeating-linear-gradient(135deg, transparent 0 6px, rgba(255, 255, 255, 0.025) 6px 12px);
   }
   .row-name {
     display: flex;
