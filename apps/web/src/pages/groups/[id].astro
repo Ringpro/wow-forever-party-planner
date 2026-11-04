@@ -45,6 +45,7 @@ if (Astro.request.method === "POST") {
       await updateGroupSettings(db, user.id, groupId, {
         timezone: String(form.get("timezone") ?? ""),
         minPlayers: Number(form.get("minPlayers")),
+        gameOnPosts: form.get("gameOnPosts") === "on",
       });
     } else if (action === "create_squad") {
       const squadId = await createSquad(db, user.id, groupId, {
@@ -345,6 +346,15 @@ const kindLabel = kind === "server" ? "Discord server" : kind === "squad" ? `Squ
           <label>
             Players needed
             <input name="minPlayers" type="number" min="1" max="40" value={group.minPlayers} />
+          </label>
+          <label class="check game-on">
+            <input type="checkbox" name="gameOnPosts" checked={group.gameOnPosts} />
+            <span>
+              Post "game on" in the board channel when enough people can play
+              <span class="muted small block">
+                Once a day, not before 10:00. Mentions the people who said Yes. Needs a board (<code>/board setup</code>).
+              </span>
+            </span>
           </label>
           <button class="button secondary" type="submit">Save</button>
         </form>
@@ -752,6 +762,14 @@ const kindLabel = kind === "server" ? "Discord server" : kind === "squad" ? `Squ
   }
   .settings[open] .stack {
     margin-top: 16px;
+  }
+  .game-on {
+    flex-basis: 100%;
+    align-items: flex-start;
+  }
+  .game-on .block {
+    display: block;
+    margin-top: 2px;
   }
   .settings-form,
   .squad-form {

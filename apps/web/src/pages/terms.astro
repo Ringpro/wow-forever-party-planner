@@ -1,0 +1,68 @@
+---
+import Layout from "../layouts/Layout.astro";
+---
+
+<Layout title="Terms">
+  <article class="legal">
+    <h1>Terms</h1>
+    <p class="muted">Last updated 4 November 2026</p>
+
+    <p>
+      Muster is a free hobby project for planning game nights with friends. By using the website, the Discord app or the
+      addon, you agree to these short terms.
+    </p>
+
+    <h2>Use it kindly</h2>
+    <ul>
+      <li>Use Muster to plan play time with people who want to plan with you.</li>
+      <li>Don't use it to spam, harass or mention people who didn't ask for it.</li>
+      <li>Don't try to see other groups' plans, break the service or overload it.</li>
+      <li>Follow Discord's terms when you use the Discord app.</li>
+    </ul>
+
+    <h2>No guarantees</h2>
+    <p>
+      Muster is provided as it is, without warranties. It may be down, lose data, change or stop. Don't rely on it for
+      anything important. Times are shown in your time zone as best we can, but check before a raid.
+    </p>
+
+    <h2>Your content</h2>
+    <p>
+      Your plans and characters are yours. You let Muster store them and show them to the groups you share with, as
+      described in the <a href="/privacy">privacy page</a>. Delete them any time from{" "}
+      <a href="/app/account">your account</a>.
+    </p>
+
+    <h2>Not affiliated with Blizzard or Discord</h2>
+    <p>
+      World of Warcraft is a trademark of Blizzard Entertainment. Discord is a trademark of Discord Inc. Muster isn't made,
+      endorsed or supported by either.
+    </p>
+
+    <h2>Changes</h2>
+    <p>
+      These terms can change as Muster does. The date at the top says when. The code is open source under the{" "}
+      <a href="https://github.com/Ringpro/wow-forever-party-planner/blob/main/LICENSE">MIT license</a>.
+    </p>
+  </article>
+</Layout>
+
+<style>
+  .legal h1 {
+    margin-bottom: 4px;
+  }
+  .legal h2 {
+    font-size: 18px;
+    margin: 28px 0 8px;
+  }
+  .legal p,
+  .legal li {
+    line-height: 1.6;
+  }
+  .legal ul {
+    padding-left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+</style>

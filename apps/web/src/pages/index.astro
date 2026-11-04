@@ -5,6 +5,7 @@ if (Astro.locals.user) return Astro.redirect("/app");
 ---
 
 <Layout title="Gather your party">
+  {Astro.url.searchParams.has("deleted") && <p class="notice">Your account and everything in it is deleted.</p>}
   <section class="hero">
     <img src="/muster.svg" width="96" height="96" alt="" />
     <h1>Gather your party</h1>
@@ -13,7 +14,10 @@ if (Astro.locals.user) return Astro.redirect("/app");
       planning, more time playing together.
     </p>
     <a class="button discord" href="/auth/discord">Log in with Discord</a>
-    <p class="muted small">We only ask Discord for your username and ID. No messages, servers or email.</p>
+    <p class="muted small">
+      We ask Discord for your username and which servers you're in, to find the ones using Muster. Never your messages or
+      email. <a href="/privacy">Privacy</a>
+    </p>
   </section>
 </Layout>
 

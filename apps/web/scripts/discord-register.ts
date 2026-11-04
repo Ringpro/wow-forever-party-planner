@@ -24,16 +24,19 @@ function readDevVars(): Record<string, string> {
   }
 }
 
-function readClientId(): string {
+function readVars(): Record<string, string> {
   const jsonc = readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8")
     .split(/\r?\n/)
     .filter((line) => !line.trim().startsWith("//"))
     .join("\n");
-  return JSON.parse(jsonc).vars.DISCORD_CLIENT_ID;
+  return JSON.parse(jsonc).vars;
 }
 
 const token = process.env.DISCORD_BOT_TOKEN ?? readDevVars().DISCORD_BOT_TOKEN;
-const clientId = readClientId();
+const vars = readVars();
+const clientId = vars.DISCORD_CLIENT_ID;
+// The production site from wrangler.jsonc (not .dev.vars, which points at localhost), for the profile links.
+const siteUrl = (vars.PUBLIC_BASE_URL ?? "").replace(/\/$/, "");
 if (!token || !clientId) {
   console.error("Need DISCORD_BOT_TOKEN (.dev.vars) and DISCORD_CLIENT_ID (wrangler.jsonc).");
   process.exit(1);
@@ -58,6 +61,9 @@ console.log(`Registered commands: ${commands.map((c) => `/${c.name}`).join(", ")
 const endpointIndex = process.argv.indexOf("--endpoint");
 const endpoint = endpointIndex > -1 ? process.argv[endpointIndex + 1] : undefined;
 const settings: Record<string, unknown> = {
+  // Shown on the app's profile and in the install dialog.
+  tags: ["scheduling", "wow", "lfg", "gaming", "calendar"],
+  ...(siteUrl ? { terms_of_service_url: `${siteUrl}/terms`, privacy_policy_url: `${siteUrl}/privacy` } : {}),
   integration_types_config: {
     0: { oauth2_install_params: { scopes: ["applications.commands", "bot"], permissions: BOT_PERMISSIONS } },
     1: { oauth2_install_params: { scopes: ["applications.commands"], permissions: "0" } },
@@ -65,7 +71,7 @@ const settings: Record<string, unknown> = {
 };
 if (endpoint) settings.interactions_endpoint_url = `${endpoint.replace(/\/$/, "")}/api/discord/interactions`;
 const app = (await call("PATCH", "/applications/@me", settings)) as { interactions_endpoint_url?: string };
-console.log("Install settings updated (server install includes the bot).");
+console.log("App profile and install settings updated (tags, privacy and terms links; server install includes the bot).");
 if (endpoint) console.log(`Interactions endpoint: ${app.interactions_endpoint_url}`);
 
 // Board dots as app emojis. Existing ones are kept, so ids stay stable.

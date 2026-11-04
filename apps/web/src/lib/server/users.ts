@@ -69,3 +69,17 @@ export async function setTimezone(db: Db, userId: string, timezone: string): Pro
 
 /** An error whose message is safe to show to the user. */
 export class UserError extends Error {}
+
+/**
+ * Deletes a user and everything that hangs off them (identities, sessions, memberships, plans,
+ * defaults, characters): the foreign keys cascade. Returns the groups they were in, so their
+ * boards can be redrawn without them.
+ */
+export async function deleteAccount(db: Db, userId: string): Promise<string[]> {
+  const groups = await db
+    .select({ groupId: schema.groupMemberships.groupId })
+    .from(schema.groupMemberships)
+    .where(eq(schema.groupMemberships.userId, userId));
+  await db.delete(schema.users).where(eq(schema.users.id, userId));
+  return groups.map((g) => g.groupId);
+}

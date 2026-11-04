@@ -52,6 +52,7 @@ const current = (key: Props["active"]) => (active === key ? "page" : undefined);
               <div class="account-menu">
                 <span class="muted small">{user.displayName}</span>
                 <a href="/onboarding?return_to=/app">Time zone</a>
+                <a href="/app/account">Account</a>
                 <form method="post" action="/auth/logout"><button class="link" type="submit">Log out</button></form>
               </div>
             </details>
@@ -64,6 +65,11 @@ const current = (key: Props["active"]) => (active === key ? "page" : undefined);
     <main class="wrap">
       <slot />
     </main>
+    <footer class="wrap site-footer muted small">
+      <a href="/privacy">Privacy</a>
+      <a href="/terms">Terms</a>
+      <a href="https://github.com/Ringpro/wow-forever-party-planner">Source code</a>
+    </footer>
     {user && (
       <nav class="tab-bar" aria-label="Main">
         <a href="/app" aria-current={current("overview")}>Tonight</a>
@@ -141,7 +147,17 @@ const current = (key: Props["active"]) => (active === key ? "page" : undefined);
   }
   main.wrap {
     padding-top: 24px;
-    padding-bottom: 64px;
+    padding-bottom: 48px;
+  }
+  .site-footer {
+    display: flex;
+    gap: 20px;
+    padding-top: 20px;
+    padding-bottom: 32px;
+    border-top: 1px solid var(--border);
+  }
+  .site-footer a {
+    color: var(--muted);
   }
   a {
     color: var(--link);
@@ -264,7 +280,7 @@ const current = (key: Props["active"]) => (active === key ? "page" : undefined);
     .signed-in .top-nav > a[href="/get"] {
       display: none;
     }
-    .signed-in main.wrap {
+    .signed-in .site-footer {
       padding-bottom: 96px;
     }
     .tab-bar {

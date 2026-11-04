@@ -1,0 +1,81 @@
+---
+import Layout from "../layouts/Layout.astro";
+---
+
+<Layout title="Privacy">
+  <article class="legal">
+    <h1>Privacy</h1>
+    <p class="muted">Last updated 4 November 2026</p>
+
+    <p>
+      Muster is a small hobby project for planning game nights. It keeps as little as it can, shows your plans only to
+      the groups you choose, and never sells anything to anyone. The code is{" "}
+      <a href="https://github.com/Ringpro/wow-forever-party-planner">open source</a>, so you can check all of this.
+    </p>
+
+    <h2>What Muster stores</h2>
+    <ul>
+      <li><strong>Your Discord account:</strong> your Discord user ID, username and display name, from logging in or using the Discord app.</li>
+      <li><strong>Your servers and groups:</strong> which Discord servers that use Muster you're in, which squads (Discord roles) you have there, and the private groups you joined. For servers, Muster also keeps the server's name and icon.</li>
+      <li><strong>Your plans:</strong> the days and times you said Yes, Maybe or No to, your weekly defaults, "free now" and "running late".</li>
+      <li><strong>Your characters:</strong> name, faction, class, level, roles and realm type, as you typed them.</li>
+      <li><strong>A login cookie</strong> that keeps you signed in for up to 30 days. Muster has no ads, no analytics and no tracking cookies.</li>
+    </ul>
+    <p>
+      When you log in, Muster asks Discord for your list of servers, only to find the ones that use Muster. The rest of the
+      list isn't kept. The Discord bot can't read your messages.
+    </p>
+
+    <h2>Who can see it</h2>
+    <ul>
+      <li>Your plans and main character are shown only to members of groups you share with. You choose this per group, and servers start unshared until you say so.</li>
+      <li>If a group has a board in a Discord channel, everyone who can see that channel sees member names, Yes/Maybe and start times for the next 7 days.</li>
+      <li>With "game on" posts turned on, people who said Yes for tonight are mentioned in that channel.</li>
+    </ul>
+
+    <h2>The WoW addon</h2>
+    <p>
+      The addon shares your level, class and quests only with party members who also run it, inside the game. None of it
+      is sent to Muster.
+    </p>
+
+    <h2>Where it lives</h2>
+    <p>
+      Muster runs on Cloudflare (Workers and D1). Discord handles logins and the Discord app. Both see the requests needed
+      to make that work, under their own privacy policies.
+    </p>
+
+    <h2>Deleting your data</h2>
+    <p>
+      Leave a group to stop sharing with it. To remove everything, use <a href="/app/account">Delete my account</a>: your
+      plans, characters, memberships and logins are deleted right away. Removing the app from your Discord account or
+      server stops new data from arriving, but doesn't delete what's stored.
+    </p>
+
+    <h2>Questions</h2>
+    <p>
+      Open an issue on <a href="https://github.com/Ringpro/wow-forever-party-planner/issues">GitHub</a>. For anything
+      sensitive, use GitHub's private <a href="https://github.com/Ringpro/wow-forever-party-planner/security">security report</a> instead.
+    </p>
+  </article>
+</Layout>
+
+<style>
+  .legal h1 {
+    margin-bottom: 4px;
+  }
+  .legal h2 {
+    font-size: 18px;
+    margin: 28px 0 8px;
+  }
+  .legal p,
+  .legal li {
+    line-height: 1.6;
+  }
+  .legal ul {
+    padding-left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+</style>

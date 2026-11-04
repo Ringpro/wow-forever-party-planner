@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { BOT_PERMISSIONS, serverInstallUrl, userInstallUrl } from "./install.ts";
 import { allComponents, cardText, COMPONENTS_V2, hasPermission, Permission, type MessagePayload } from "./types.ts";
+import { gameOnAction, gameOnMessage } from "./game-on.ts";
 import { verifyDiscordRequest } from "./verify.ts";
 import { BOARD_DOT, boardMessage, delayMessage, fromHhmm, hhmm, plannerMessage, whoMessage } from "./views.ts";
 
@@ -220,6 +221,71 @@ describe("board and who", () => {
     expect(text).toContain("No answer: Hidden");
     expect(text).toContain("Times in Europe/London");
     expect(ids(m)).toEqual(["wd:g1"]);
+    expect(m.allowed_mentions).toEqual({ parse: [] });
+  });
+});
+
+describe("game on", () => {
+  const at = (iso: string) => Date.parse(iso);
+  const tz = "Europe/Copenhagen"; // UTC+1 in November
+  const best = { startsAt: at("2026-11-04T19:30:00Z"), memberIds: ["u1", "u2", "u3"], includesMaybe: false };
+  const base = { enabled: true, today: "2026-11-04", best, postedDay: null, hasMessage: false, tz };
+  const now = (localTime: string) => at(`2026-11-04T${localTime}:00+01:00`);
+
+  it("posts once a day when enough people said Yes, not before 10:00 or long after the start", () => {
+    expect(gameOnAction({ ...base, now: now("09:30") })).toBe("none");
+    expect(gameOnAction({ ...base, now: now("10:00") })).toBe("post");
+    expect(gameOnAction({ ...base, now: now("21:00") })).toBe("post");
+    expect(gameOnAction({ ...base, now: now("21:45") })).toBe("none");
+    expect(gameOnAction({ ...base, enabled: false, now: now("12:00") })).toBe("none");
+  });
+
+  it("doesn't count a start that needs the Maybes", () => {
+    expect(gameOnAction({ ...base, best: { ...best, includesMaybe: true }, now: now("12:00") })).toBe("none");
+    expect(gameOnAction({ ...base, best: null, now: now("12:00") })).toBe("none");
+  });
+
+  it("keeps today's post up to date instead of posting again, even after it goes off", () => {
+    const posted = { ...base, postedDay: "2026-11-04", hasMessage: true };
+    expect(gameOnAction({ ...posted, now: now("12:00") })).toBe("update");
+    expect(gameOnAction({ ...posted, best: null, now: now("12:00") })).toBe("update");
+    expect(gameOnAction({ ...posted, hasMessage: false, now: now("12:00") })).toBe("none");
+    expect(gameOnAction({ ...posted, postedDay: "2026-11-03", now: now("12:00") })).toBe("post");
+  });
+
+  const members = [
+    { userId: "u1", displayName: "Anders", status: "yes" as const, slots: [{ status: "yes" as const, startsAt: best.startsAt }] },
+    { userId: "u2", displayName: "Bo", status: "yes" as const, slots: [{ status: "yes" as const, startsAt: best.startsAt }] },
+    { userId: "u3", displayName: "Carsten", status: "yes" as const, slots: [{ status: "yes" as const, startsAt: best.startsAt }] },
+    { userId: "u4", displayName: "Dennis", status: "maybe" as const, slots: [{ status: "maybe" as const, startsAt: best.startsAt }] },
+    { userId: "u5", displayName: "Erik", status: "no" as const },
+  ];
+  const input = {
+    groupId: "g1",
+    groupName: "The Dads",
+    tz,
+    minPlayers: 3,
+    day: { day: "2026-11-04", members, best },
+    mentions: new Map([["u1", "111111111111"], ["u2", "222222222222"], ["u4", "444444444444"]]),
+  };
+
+  it("mentions only tonight's party, with buttons to join, run late or drop out", () => {
+    const m = gameOnMessage(input);
+    const text = cardText(m);
+    expect(text).toContain("Game on tonight · 20:30");
+    expect(text).toContain("3 can play: <@111111111111> 20:30  ·  <@222222222222> 20:30  ·  **Carsten** 20:30");
+    expect(text).toContain("Also: Dennis (maybe) 20:30");
+    expect(text).not.toContain("<@444444444444>");
+    expect(m.allowed_mentions).toEqual({ parse: [], users: ["111111111111", "222222222222"] });
+    expect(ids(m)).toEqual(["go:in:g1:2026-11-04:2030", "bd:delay:g1", "go:out:g1:2026-11-04"]);
+  });
+
+  it("says when it's off, without pinging anyone", () => {
+    const m = gameOnMessage({ ...input, day: { ...input.day, best: null } });
+    expect(cardText(m)).toContain("Off tonight");
+    expect(cardText(m)).toContain("The Yes times don't overlap enough right now.");
+    const few = gameOnMessage({ ...input, day: { ...input.day, best: null, members: members.slice(0, 2) } });
+    expect(cardText(few)).toContain("Only 2 said Yes now, 3 needed.");
     expect(m.allowed_mentions).toEqual({ parse: [] });
   });
 });

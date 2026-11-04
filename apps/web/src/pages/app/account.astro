@@ -1,0 +1,57 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import { refreshBoardsLater } from "../../lib/server/background.ts";
+import { getDb } from "../../lib/server/db.ts";
+import { clearSessionCookie } from "../../lib/server/session.ts";
+import { deleteAccount } from "../../lib/server/users.ts";
+
+const user = Astro.locals.user!;
+let error: string | null = null;
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  if (form.get("confirm") === "delete") {
+    const groupIds = await deleteAccount(getDb(), user.id);
+    refreshBoardsLater(Astro.locals, { groupIds });
+    clearSessionCookie(Astro.cookies);
+    return Astro.redirect("/?deleted=1");
+  }
+  error = "Tick the box to confirm.";
+}
+---
+
+<Layout title="Your account">
+  <h1>Your account</h1>
+  <div id="flash">{error && <p class="error" role="alert">{error}</p>}</div>
+
+  <section class="card">
+    <h2>{user.displayName}</h2>
+    <p class="muted small">Logged in with Discord · times in {user.timezone?.replaceAll("_", " ") ?? "no time zone yet"}</p>
+    <p><a href="/onboarding?return_to=/app/account">Change time zone</a></p>
+  </section>
+
+  <section class="card danger-zone">
+    <h2>Delete my account</h2>
+    <p>
+      This deletes your plans, weekly defaults, characters, group memberships and logins from Muster right away. It can't
+      be undone. Groups you created stay for their other members.
+    </p>
+    <form method="post" class="stack">
+      <label class="check">
+        <input type="checkbox" name="confirm" value="delete" required />
+        Yes, delete everything Muster has about me
+      </label>
+      <div><button class="button danger" type="submit">Delete my account</button></div>
+    </form>
+    <p class="muted small">
+      Using the Discord app again later creates a fresh, empty account. See the <a href="/privacy">privacy page</a> for
+      what Muster stores.
+    </p>
+  </section>
+</Layout>
+
+<style>
+  .danger-zone {
+    border-color: color-mix(in srgb, var(--no) 45%, var(--border));
+  }
+</style>

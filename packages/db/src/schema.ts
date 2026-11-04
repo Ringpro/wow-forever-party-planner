@@ -62,6 +62,8 @@ export const groups = sqliteTable(
     discordRoleId: text("discord_role_id"),
     parentGroupId: text("parent_group_id").references((): AnySQLiteColumn => groups.id, { onDelete: "cascade" }),
     iconUrl: text("icon_url"),
+    // Post a "game on" message in the group's board channels once a day when enough people can play.
+    gameOnPosts: integer("game_on_posts", { mode: "boolean" }).notNull().default(false),
     createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: createdAt(),
   },
@@ -199,5 +201,9 @@ export const discordBoards = sqliteTable("discord_boards", {
   dirtySince: integer("dirty_since"),
   lastRenderedAt: integer("last_rendered_at"),
   lastRenderHash: text("last_render_hash"),
+  // Today's "game on" post in this channel: which gaming day, its message, and what it last showed.
+  gameOnDay: text("game_on_day"),
+  gameOnMessageId: text("game_on_message_id"),
+  gameOnHash: text("game_on_hash"),
   createdAt: createdAt(),
 });

@@ -21,7 +21,7 @@ import {
 import { setMainLevel } from "../server/characters.ts";
 import { syncFromInteraction } from "../server/discord-sync.ts";
 import { boardForChannel, refreshBoardsFor, removeBoard, setupBoard } from "../server/boards.ts";
-import { getGroupAsMember, listMyGroups } from "../server/groups.ts";
+import { getGroupAsMember, listMyGroups, setGameOnPosts } from "../server/groups.ts";
 import type { SessionUser } from "../server/session.ts";
 import { UserError, discordIdsFor, findOrCreateDiscordUser, getUser, setTimezone } from "../server/users.ts";
 import {
@@ -271,11 +271,60 @@ const boardCommand: Handler = async ({ ctx, interaction, actor }) => {
   });
 };
 
+/** The reply after posting a board, with the switch for daily "game on" posts. */
+function boardPostedMessage(groupId: string, gameOn: boolean): MessagePayload {
+  return {
+    content:
+      "Board posted. It updates by itself whenever anyone changes their plans.\n" +
+      (gameOn
+        ? "**Game on posts are on:** once a day, when enough people said Yes for tonight, I'll post here and mention them."
+        : "Want a ping when a game comes together? Turn on **game on posts**: once a day, when enough people said Yes for tonight, I'll post here and mention them."),
+    components: [
+      row(
+        gameOn
+          ? { type: 2, style: 2, label: "Turn off game on posts", custom_id: `gs:off:${groupId}` }
+          : { type: 2, style: 3, label: "Turn on game on posts", custom_id: `gs:on:${groupId}` },
+      ),
+    ],
+  };
+}
+
 const pickBoardGroup: Handler = async ({ ctx, interaction, actor }) => {
   const target = requireManageChannels(interaction);
   const groupId = interaction.data?.values?.[0] ?? "";
   await setupBoard(ctx.db, actor.id, { groupId, ...target });
-  return update({ content: "Board posted. It updates by itself whenever anyone changes their plans." });
+  const access = await getGroupAsMember(ctx.db, actor.id, groupId);
+  return update(boardPostedMessage(groupId, access?.group.gameOnPosts ?? false));
+};
+
+/** "Game on" buttons: Count me in adds a Yes at tonight's start, I'm out says can't play. */
+const gameOnIn: Handler = async ({ ctx, actor, parts }) => {
+  const [, , groupId = "", day = "", time] = parts;
+  await requireMember(ctx, actor.id, groupId);
+  const start = fromHhmm(time);
+  if (!start) throw new UserError("That button has expired.");
+  if (day !== planningDays(actor.timezone)[0]) throw new UserError("That game night is over.");
+  await addSlot(ctx.db, actor, day, "discord", start, "yes");
+  refresh(ctx, actor.id);
+  return reply({ content: `You're in from **${start}** tonight. Change it any time with \`/avail\`.` });
+};
+
+const gameOnOut: Handler = async ({ ctx, actor, parts }) => {
+  const [, , groupId = "", day = ""] = parts;
+  await requireMember(ctx, actor.id, groupId);
+  if (day !== planningDays(actor.timezone)[0]) throw new UserError("That game night is over.");
+  await setDayStatus(ctx.db, actor, day, "no", "discord");
+  refresh(ctx, actor.id);
+  return reply({ content: "Okay, you're out tonight. The post updates for everyone." });
+};
+
+const toggleGameOn: Handler = async ({ ctx, interaction, actor, parts }) => {
+  const on = parts[1] === "on";
+  const groupId = parts[2] ?? "";
+  requireManageChannels(interaction);
+  await setGameOnPosts(ctx.db, actor.id, groupId, on);
+  ctx.waitUntil(refreshBoardsFor(ctx.db, { groupIds: [groupId] }));
+  return update(boardPostedMessage(groupId, on));
 };
 
 // ── Routing tables ───────────────────────────────────────────────────────────────────────
@@ -334,6 +383,10 @@ const COMPONENTS: Record<string, Handler> = {
     return update({ content: "Okay, you're no longer marked as free." });
   },
   "bs:pick": pickBoardGroup,
+  "gs:on": toggleGameOn,
+  "gs:off": toggleGameOn,
+  "go:in": gameOnIn,
+  "go:out": gameOnOut,
   "bd:plan": async ({ ctx, actor, parts }) => {
     await requireMember(ctx, actor.id, parts[2] ?? "");
     return reply(await planner(ctx.db, actor));

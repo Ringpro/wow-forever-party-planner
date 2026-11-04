@@ -70,7 +70,7 @@ export type MessagePayload = {
   embeds?: Embed[];
   components?: Component[];
   flags?: number;
-  allowed_mentions?: { parse: string[] };
+  allowed_mentions?: { parse: string[]; users?: string[] };
 };
 
 export type InteractionResponse =

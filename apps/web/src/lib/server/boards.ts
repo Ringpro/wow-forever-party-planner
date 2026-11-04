@@ -3,27 +3,34 @@ import { env } from "cloudflare:workers";
 import { schema, type Db } from "@muster/db";
 import { eq, inArray } from "drizzle-orm";
 import { DiscordApiError, ErrorCode, deleteMessage, editMessage, postMessage } from "../discord/api.ts";
+import { gameOnAction, gameOnMessage } from "../discord/game-on.ts";
 import { boardMessage } from "../discord/views.ts";
-import { boardWeek } from "./availability.ts";
+import { boardWeek, type WeekView } from "./availability.ts";
 import { sha256Hex } from "./crypto.ts";
 import { getGroupAsMember } from "./groups.ts";
 import { UserError, discordIdsFor } from "./users.ts";
 
 type Board = typeof schema.discordBoards.$inferSelect;
 
-async function renderBoard(db: Db, groupId: string) {
+async function loadBoard(db: Db, groupId: string) {
   const week = await boardWeek(db, groupId);
   if (!week) return null;
-  return boardMessage({
+  const mentions = await discordIdsFor(db, week.members.map((m) => m.userId));
+  const message = boardMessage({
     groupId,
     groupName: week.group.name,
     tz: week.group.timezone,
     minPlayers: week.group.minPlayers,
     days: week.days,
     freeNow: week.freeNow,
-    mentions: await discordIdsFor(db, week.members.map((m) => m.userId)),
+    mentions,
     websiteUrl: env.PUBLIC_BASE_URL,
   });
+  return { week, mentions, message };
+}
+
+async function renderBoard(db: Db, groupId: string) {
+  return (await loadBoard(db, groupId))?.message ?? null;
 }
 
 /** Posts (or moves) a group's board to a channel. The actor must be a group admin. */
@@ -86,8 +93,10 @@ export async function boardForChannel(db: Db, channelId: string): Promise<Board 
 }
 
 async function refreshBoard(db: Db, board: Board): Promise<void> {
-  const message = await renderBoard(db, board.groupId);
-  if (!message) return;
+  const loaded = await loadBoard(db, board.groupId);
+  if (!loaded) return;
+  await syncGameOn(db, board, loaded.week, loaded.mentions);
+  const { message } = loaded;
   const hash = await sha256Hex(JSON.stringify(message));
   if (hash === board.lastRenderHash && board.messageId) return;
 
@@ -119,6 +128,63 @@ async function refreshBoard(db: Db, board: Board): Promise<void> {
     .update(schema.discordBoards)
     .set({ messageId, lastRenderHash: hash, lastRenderedAt: Date.now(), dirtySince: null })
     .where(eq(schema.discordBoards.id, board.id));
+}
+
+/** Posts today's "game on" message when it's time, and keeps it in step with the plans after that. */
+async function syncGameOn(db: Db, board: Board, week: WeekView, mentions: Map<string, string>): Promise<void> {
+  const today = week.days[0];
+  if (!today) return;
+  const action = gameOnAction({
+    enabled: week.group.gameOnPosts,
+    today: today.day,
+    best: today.best,
+    postedDay: board.gameOnDay,
+    hasMessage: board.gameOnMessageId !== null,
+    now: Date.now(),
+    tz: week.group.timezone,
+  });
+  if (action === "none") return;
+
+  const message = gameOnMessage({
+    groupId: week.group.id,
+    groupName: week.group.name,
+    tz: week.group.timezone,
+    minPlayers: week.group.minPlayers,
+    day: today,
+    mentions,
+  });
+  const hash = await sha256Hex(JSON.stringify(message));
+  if (action === "update" && hash === board.gameOnHash) return;
+
+  try {
+    if (action === "post") {
+      const posted = await postMessage(board.channelId, message);
+      console.log(JSON.stringify({ event: "game_on_posted", boardId: board.id }));
+      await db
+        .update(schema.discordBoards)
+        .set({ gameOnDay: today.day, gameOnMessageId: posted.id, gameOnHash: hash })
+        .where(eq(schema.discordBoards.id, board.id));
+    } else {
+      // Edits never notify anyone, so going off and on again doesn't ping twice.
+      await editMessage(board.channelId, board.gameOnMessageId!, message);
+      await db.update(schema.discordBoards).set({ gameOnHash: hash }).where(eq(schema.discordBoards.id, board.id));
+    }
+  } catch (e) {
+    if (!(e instanceof DiscordApiError)) throw e;
+    if (e.code === ErrorCode.UnknownMessage) {
+      // Someone deleted today's post: leave it deleted.
+      await db.update(schema.discordBoards).set({ gameOnMessageId: null }).where(eq(schema.discordBoards.id, board.id));
+      return;
+    }
+    console.log(JSON.stringify({ event: "game_on_failed", boardId: board.id, status: e.status, code: e.code }));
+    if (action === "post") {
+      // Don't retry every minute for the rest of the day.
+      await db
+        .update(schema.discordBoards)
+        .set({ gameOnDay: today.day, gameOnMessageId: null })
+        .where(eq(schema.discordBoards.id, board.id));
+    }
+  }
 }
 
 async function refreshEach(db: Db, boards: Board[]): Promise<void> {

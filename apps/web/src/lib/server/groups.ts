@@ -228,7 +228,7 @@ export async function updateGroupSettings(
   db: Db,
   actorId: string,
   groupId: string,
-  input: { timezone: string; minPlayers: number },
+  input: { timezone: string; minPlayers: number; gameOnPosts?: boolean },
 ): Promise<void> {
   await requireAdmin(db, actorId, groupId);
   if (!isValidTimeZone(input.timezone)) throw new UserError("Unknown time zone.");
@@ -237,13 +237,23 @@ export async function updateGroupSettings(
   }
   await db
     .update(schema.groups)
-    .set({ timezone: input.timezone, minPlayers: input.minPlayers })
+    .set({
+      timezone: input.timezone,
+      minPlayers: input.minPlayers,
+      ...(input.gameOnPosts === undefined ? {} : { gameOnPosts: input.gameOnPosts }),
+    })
     .where(eq(schema.groups.id, groupId));
 }
 
 // ── Discord servers and squads (architecture §4.6) ───────────────────────────────────────
 // These take facts already checked against Discord (which servers someone is in, their roles)
 // and keep memberships in line with them. Only "discord" memberships are ever changed here.
+
+/** Turns the daily "game on" post on or off for a group's boards. Admins only. */
+export async function setGameOnPosts(db: Db, actorId: string, groupId: string, on: boolean): Promise<void> {
+  await requireAdmin(db, actorId, groupId);
+  await db.update(schema.groups).set({ gameOnPosts: on }).where(eq(schema.groups.id, groupId));
+}
 
 export type DiscordServer = { guildId: string; name: string; iconUrl: string | null };
 
