@@ -2,10 +2,15 @@
 import { WOW_CLASSES } from "@muster/db";
 import Layout from "../../layouts/Layout.astro";
 import { refreshBoardsLater } from "../../lib/server/background.ts";
+import { ROLES } from "@muster/db";
 import {
   CLASS_COLORS,
   CLASS_NAMES,
+  CLASS_ROLES,
   MAX_LEVEL,
+  REALM_TYPE_NAMES,
+  ROLE_NAMES,
+  rolesOf,
   deleteCharacter,
   listCharacters,
   saveCharacter,
@@ -27,12 +32,18 @@ if (Astro.request.method === "POST") {
       const characters = await listCharacters(db, user.id);
       const current = characters.find((c) => c.id === id);
       if (action === "main" && current) {
-        await saveCharacter(db, user.id, { ...current, realm: current.realm ?? "", isMain: true });
+        await saveCharacter(db, user.id, {
+          ...current,
+          realmType: current.realmType ?? "",
+          roles: rolesOf(current),
+          isMain: true,
+        });
       } else {
         await saveCharacter(db, user.id, {
           id,
           name: String(form.get("name") ?? ""),
-          realm: String(form.get("realm") ?? ""),
+          realmType: String(form.get("realmType") ?? ""),
+          roles: form.getAll("roles").map(String),
           faction: String(form.get("faction") ?? ""),
           class: String(form.get("class") ?? ""),
           level: Number(form.get("level")),
@@ -74,7 +85,8 @@ const editing = characters.find((c) => c.id === Astro.url.searchParams.get("edit
                 {c.isMain && <span class="chip yes">Main</span>}
                 <span class="muted small block">
                   Level {c.level} {c.faction === "alliance" ? "Alliance" : "Horde"} {CLASS_NAMES[c.class]}
-                  {c.realm && ` · ${c.realm}`}
+                  {rolesOf(c).length > 0 && ` · ${rolesOf(c).map((r) => ROLE_NAMES[r]).join(", ")}`}
+                  {c.realmType && ` · ${REALM_TYPE_NAMES[c.realmType]} realm`}
                 </span>
               </span>
             </span>
@@ -102,8 +114,13 @@ const editing = characters.find((c) => c.id === Astro.url.searchParams.get("edit
       <input name="name" required minlength="2" maxlength="24" value={editing?.name ?? ""} placeholder="Thrallson" />
     </label>
     <label>
-      Realm <span class="muted small">(optional)</span>
-      <input name="realm" maxlength="40" value={editing?.realm ?? ""} />
+      Realm type
+      <select name="realmType">
+        <option value="">Not set</option>
+        {Object.entries(REALM_TYPE_NAMES).map(([value, label]) => (
+          <option value={value} selected={editing?.realmType === value}>{label}</option>
+        ))}
+      </select>
     </label>
     <fieldset class="faction">
       <legend>Faction</legend>
@@ -112,11 +129,20 @@ const editing = characters.find((c) => c.id === Astro.url.searchParams.get("edit
     </fieldset>
     <label>
       Class
-      <select name="class" required>
+      <select name="class" required data-class-roles={JSON.stringify(CLASS_ROLES)}>
         {!editing && <option value="">Pick a class</option>}
         {WOW_CLASSES.map((cls) => <option value={cls} selected={editing?.class === cls}>{CLASS_NAMES[cls]}</option>)}
       </select>
     </label>
+    <fieldset class="roles">
+      <legend>Roles</legend>
+      {ROLES.map((role) => (
+        <label class="check" data-role={role}>
+          <input type="checkbox" name="roles" value={role} checked={editing ? rolesOf(editing).includes(role) : false} />
+          {ROLE_NAMES[role]}
+        </label>
+      ))}
+    </fieldset>
     <label>
       Level
       <input name="level" type="number" min="1" max={MAX_LEVEL} required value={editing?.level ?? 1} />
@@ -137,6 +163,28 @@ const editing = characters.find((c) => c.id === Astro.url.searchParams.get("edit
     </form>
   )}
 </Layout>
+
+<script>
+  // Only offer the roles the chosen class can play (the server checks too).
+  const classSelect = document.querySelector("select[data-class-roles]");
+  if (classSelect instanceof HTMLSelectElement) {
+    const classRoles = JSON.parse(classSelect.dataset.classRoles ?? "{}") as Record<string, string[]>;
+    const update = () => {
+      const allowed = classRoles[classSelect.value];
+      for (const label of document.querySelectorAll("[data-role]")) {
+        if (!(label instanceof HTMLElement)) continue;
+        const ok = !allowed || allowed.includes(label.dataset.role ?? "");
+        label.hidden = !ok;
+        const box = label.querySelector("input");
+        if (!box) continue;
+        if (!ok) box.checked = false;
+        else if (allowed?.length === 1) box.checked = true;
+      }
+    };
+    classSelect.addEventListener("change", update);
+    update();
+  }
+</script>
 
 <style>
   .who {
@@ -163,7 +211,8 @@ const editing = characters.find((c) => c.id === Astro.url.searchParams.get("edit
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 14px;
   }
-  .faction {
+  .faction,
+  .roles {
     border: 0;
     padding: 0;
     margin: 0;
@@ -172,11 +221,15 @@ const editing = characters.find((c) => c.id === Astro.url.searchParams.get("edit
     align-items: center;
     flex-wrap: wrap;
   }
-  .faction legend {
+  .faction legend,
+  .roles legend {
     font-weight: 500;
     padding: 0;
     margin-bottom: 6px;
     width: 100%;
+  }
+  [data-role][hidden] {
+    display: none;
   }
   .form-buttons {
     display: flex;

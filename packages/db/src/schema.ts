@@ -161,13 +161,18 @@ export const WOW_CLASSES = [
   "druid",
 ] as const;
 
+export const ROLES = ["tank", "healer", "dps"] as const;
+export const REALM_TYPES = ["pvp", "pve", "rp_pvp", "rp_pve"] as const;
+
 export const characters = sqliteTable(
   "characters",
   {
     id: text("id").primaryKey(),
     userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
-    realm: text("realm"),
+    realmType: text("realm_type", { enum: REALM_TYPES }),
+    /** Comma-separated subset of ROLES, e.g. "tank,healer". */
+    roles: text("roles").notNull().default(""),
     faction: text("faction", { enum: ["alliance", "horde"] }).notNull(),
     class: text("class", { enum: WOW_CLASSES }).notNull(),
     level: integer("level").notNull().default(1),

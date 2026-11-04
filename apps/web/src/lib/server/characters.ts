@@ -1,12 +1,14 @@
-// Characters: name, faction, class and level, typed in by the player. One of them is their main,
-// which groups see next to their name.
-import { WOW_CLASSES, schema, type Db } from "@muster/db";
+// Characters: name, faction, class, level, roles and realm type, typed in by the player. One of
+// them is their main, which groups see next to their name.
+import { REALM_TYPES, ROLES, WOW_CLASSES, schema, type Db } from "@muster/db";
 import { and, eq, inArray } from "drizzle-orm";
 import { UserError } from "./users.ts";
 
 export type Character = typeof schema.characters.$inferSelect;
 export type WowClass = (typeof WOW_CLASSES)[number];
-export type MainCharacter = Pick<Character, "name" | "faction" | "class" | "level">;
+export type Role = (typeof ROLES)[number];
+export type RealmType = (typeof REALM_TYPES)[number];
+export type MainCharacter = Pick<Character, "name" | "faction" | "class" | "level" | "roles" | "realmType">;
 
 export const MAX_LEVEL = 60;
 const MAX_CHARACTERS = 20;
@@ -22,6 +24,32 @@ export const CLASS_NAMES: Record<WowClass, string> = {
   warlock: "Warlock",
   druid: "Druid",
 };
+
+export const ROLE_NAMES: Record<Role, string> = { tank: "Tank", healer: "Healer", dps: "DPS" };
+
+export const REALM_TYPE_NAMES: Record<RealmType, string> = {
+  pvp: "PvP",
+  pve: "PvE",
+  rp_pvp: "RP-PvP",
+  rp_pve: "RP-PvE",
+};
+
+/** The roles each class can fill in classic-style WoW. */
+export const CLASS_ROLES: Record<WowClass, readonly Role[]> = {
+  warrior: ["tank", "dps"],
+  paladin: ["tank", "healer", "dps"],
+  hunter: ["dps"],
+  rogue: ["dps"],
+  priest: ["healer", "dps"],
+  shaman: ["healer", "dps"],
+  mage: ["dps"],
+  warlock: ["dps"],
+  druid: ["tank", "healer", "dps"],
+};
+
+export function rolesOf(character: Pick<Character, "roles">): Role[] {
+  return ROLES.filter((r) => character.roles.split(",").includes(r));
+}
 
 /** Blizzard's class colours, used for a small dot next to names. */
 export const CLASS_COLORS: Record<WowClass, string> = {
@@ -50,7 +78,16 @@ function checkLevel(level: number): number {
 export async function saveCharacter(
   db: Db,
   userId: string,
-  input: { id?: string; name: string; realm: string; faction: string; class: string; level: number; isMain: boolean },
+  input: {
+    id?: string;
+    name: string;
+    realmType: string;
+    roles: readonly string[];
+    faction: string;
+    class: string;
+    level: number;
+    isMain: boolean;
+  },
 ): Promise<void> {
   const name = input.name.trim();
   if (name.length < 2 || name.length > 24) throw new UserError("Character names are 2 to 24 characters.");
@@ -59,19 +96,28 @@ export async function saveCharacter(
   const cls = WOW_CLASSES.find((c) => c === input.class);
   if (!cls) throw new UserError("Pick a class.");
   const level = checkLevel(input.level);
-  const realm = input.realm.trim().slice(0, 40) || null;
+  const realmType = REALM_TYPES.find((r) => r === input.realmType) ?? null;
+  if (input.realmType && !realmType) throw new UserError("Pick a realm type.");
+  const allowed = CLASS_ROLES[cls];
+  // A class with one role always has it; others need at least one picked.
+  if (input.roles.some((r) => !allowed.includes(r as Role))) {
+    throw new UserError(`${CLASS_NAMES[cls]}s can be ${allowed.map((r) => ROLE_NAMES[r]).join(" or ")}.`);
+  }
+  const roles = allowed.length === 1 ? [...allowed] : allowed.filter((r) => input.roles.includes(r));
+  if (roles.length === 0) throw new UserError(`Pick a role ${CLASS_NAMES[cls]}s can play.`);
 
   const existing = await listCharacters(db, userId);
   if (input.id && !existing.some((c) => c.id === input.id)) throw new UserError("That character isn't yours.");
   if (!input.id && existing.length >= MAX_CHARACTERS) throw new UserError(`You can have up to ${MAX_CHARACTERS} characters.`);
-  const same = (c: Character) => c.name.toLowerCase() === name.toLowerCase() && (c.realm ?? "") === (realm ?? "");
+  const same = (c: Character) => c.name.toLowerCase() === name.toLowerCase();
   if (existing.some((c) => c.id !== input.id && same(c))) throw new UserError(`You already have a character called ${name}.`);
   // The first character is always the main.
   const isMain = input.isMain || existing.length === 0 || (existing.length === 1 && existing[0]!.id === input.id);
 
   const values: Omit<typeof schema.characters.$inferInsert, "id" | "userId"> = {
     name,
-    realm,
+    realmType,
+    roles: roles.join(","),
     faction,
     class: cls,
     level,
@@ -123,6 +169,8 @@ export async function mainCharacters(db: Db, userIds: string[]): Promise<Map<str
       faction: schema.characters.faction,
       class: schema.characters.class,
       level: schema.characters.level,
+      roles: schema.characters.roles,
+      realmType: schema.characters.realmType,
     })
     .from(schema.characters)
     .where(and(inArray(schema.characters.userId, userIds), eq(schema.characters.isMain, true)));
@@ -130,5 +178,6 @@ export async function mainCharacters(db: Db, userIds: string[]): Promise<Map<str
 }
 
 export function describeCharacter(c: MainCharacter): string {
-  return `${c.faction === "alliance" ? "Alliance" : "Horde"} ${CLASS_NAMES[c.class]} · ${c.level}`;
+  const roles = rolesOf(c).map((r) => ROLE_NAMES[r]).join(", ");
+  return `${c.faction === "alliance" ? "Alliance" : "Horde"} ${CLASS_NAMES[c.class]} · ${c.level}${roles ? ` · ${roles}` : ""}`;
 }

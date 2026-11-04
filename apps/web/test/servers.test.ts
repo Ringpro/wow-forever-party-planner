@@ -15,7 +15,14 @@ import {
   addDefaultSlot,
   type WeekView,
 } from "../src/lib/server/availability.ts";
-import { deleteCharacter, listCharacters, saveCharacter, setMainLevel } from "../src/lib/server/characters.ts";
+import {
+  deleteCharacter,
+  describeCharacter,
+  listCharacters,
+  rolesOf,
+  saveCharacter,
+  setMainLevel,
+} from "../src/lib/server/characters.ts";
 import {
   createGroup,
   createSquad,
@@ -245,23 +252,27 @@ describe("characters", () => {
   });
 
   it("makes the first character the main and keeps only one main", async () => {
-    await saveCharacter(db, kim.id, { name: "Kimdruid", realm: "", faction: "horde", class: "druid", level: 30, isMain: false });
-    await saveCharacter(db, kim.id, { name: "Kimmage", realm: "", faction: "horde", class: "mage", level: 12, isMain: false });
+    await saveCharacter(db, kim.id, { name: "Kimdruid", realmType: "pvp", roles: ["tank", "healer"], faction: "horde", class: "druid", level: 30, isMain: false });
+    await saveCharacter(db, kim.id, { name: "Kimmage", realmType: "", roles: [], faction: "horde", class: "mage", level: 12, isMain: false });
     let chars = await listCharacters(db, kim.id);
     expect(chars.filter((c) => c.isMain).map((c) => c.name)).toEqual(["Kimdruid"]);
 
     const mage = chars.find((c) => c.name === "Kimmage")!;
-    await saveCharacter(db, kim.id, { ...mage, realm: "", isMain: true });
+    expect(rolesOf(mage)).toEqual(["dps"]); // one-role classes get their role automatically
+    await saveCharacter(db, kim.id, { ...mage, realmType: mage.realmType ?? "", roles: rolesOf(mage), isMain: true });
     chars = await listCharacters(db, kim.id);
     expect(chars.filter((c) => c.isMain).map((c) => c.name)).toEqual(["Kimmage"]);
   });
 
   it("checks input and ownership", async () => {
-    const base = { name: "Okname", realm: "", faction: "alliance", class: "rogue", level: 10, isMain: false };
+    const base = { name: "Okname", realmType: "", roles: [] as string[], faction: "alliance", class: "rogue", level: 10, isMain: false };
     await expect(saveCharacter(db, kim.id, { ...base, level: 61 })).rejects.toThrow("Level");
     await expect(saveCharacter(db, kim.id, { ...base, class: "monk" })).rejects.toThrow("class");
     await expect(saveCharacter(db, kim.id, { ...base, faction: "neutral" })).rejects.toThrow("Alliance or Horde");
     await expect(saveCharacter(db, kim.id, { ...base, name: "kimdruid" })).rejects.toThrow("already have");
+    await expect(saveCharacter(db, kim.id, { ...base, class: "warrior", roles: ["healer"] })).rejects.toThrow("Tank or DPS");
+    await expect(saveCharacter(db, kim.id, { ...base, class: "druid", roles: [] })).rejects.toThrow("Pick a role");
+    await expect(saveCharacter(db, kim.id, { ...base, realmType: "pvp-ish" })).rejects.toThrow("realm type");
     const kims = await listCharacters(db, kim.id);
     await expect(saveCharacter(db, lars.id, { ...base, id: kims[0]!.id })).rejects.toThrow("isn't yours");
   });
@@ -275,7 +286,9 @@ describe("characters", () => {
   });
 
   it("shows mains only to groups the player shares with", async () => {
-    expect((await groupWeek(db, lars, group))!.characters.get(kim.id)).toMatchObject({ name: "Kimdruid", class: "druid" });
+    const main = (await groupWeek(db, lars, group))!.characters.get(kim.id)!;
+    expect(main).toMatchObject({ name: "Kimdruid", class: "druid", realmType: "pvp" });
+    expect(describeCharacter(main)).toBe("Horde Druid · 30 · Tank, Healer");
     await setSharing(db, kim.id, group, false);
     expect((await groupWeek(db, lars, group))!.characters.has(kim.id)).toBe(false);
   });
