@@ -12,7 +12,7 @@
     "deploy": "pnpm --filter web deploy",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
-    "db:generate": "pnpm --filter @party/db generate",
+    "db:generate": "pnpm --filter @muster/db generate",
     "db:migrate:local": "pnpm --filter web db:migrate:local",
     "db:migrate:remote": "pnpm --filter web db:migrate:remote",
     "discord:register": "pnpm --filter web discord:register"

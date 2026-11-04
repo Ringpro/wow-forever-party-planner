@@ -13,21 +13,16 @@ const user = Astro.locals.user;
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#14161c" />
-    <title>{title} · Party Planner</title>
-    <link
-      rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z' fill='%23e3b341'/%3E%3C/svg%3E"
-    />
+    <title>{title} · Muster</title>
+    <link rel="icon" href="/muster.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   </head>
   <body>
     <header class="site-header">
       <div class="wrap header-inner">
         <a href={user ? "/app" : "/"} class="brand">
-          <svg viewBox="0 0 32 32" width="22" height="22" aria-hidden="true">
-            <path d="M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z" fill="var(--accent)"></path>
-            <path d="M11 16.5l3.5 3.5 7-8" fill="none" stroke="var(--accent-ink)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"></path>
-          </svg>
-          Party Planner
+          <img src="/muster.svg" width="28" height="28" alt="" />
+          Muster
         </a>
         <nav>
           {user && <a href="/app" aria-current={active === "schedule" ? "page" : undefined}>Schedule</a>}

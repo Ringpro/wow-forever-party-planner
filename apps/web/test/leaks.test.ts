@@ -1,8 +1,8 @@
 // Privacy and weekly-default behaviour against a real D1 (architecture §5.2).
 // Groups: "Dads" = Anders (admin) + Bo. "Work" = Carsten (admin) + Anders.
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import type { Db } from "@party/db";
-import { addDays, isoWeekday, type LocalDate } from "@party/domain";
+import type { Db } from "@muster/db";
+import { addDays, isoWeekday, type LocalDate } from "@muster/domain";
 import {
   boardWeek,
   copyWeekForward,

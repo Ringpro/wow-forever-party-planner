@@ -1,4 +1,6 @@
-# Party Planner
+<p align="center"><img src="apps/web/public/muster.svg" width="96" alt="Muster logo: a red war banner with a gold M"></p>
+
+# Muster
 
 **Less time planning. More time playing together.**
 

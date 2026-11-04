@@ -31,11 +31,11 @@ Sources: [Warcraft Wiki: Patch 1.60.1](https://warcraft.wiki.gg/wiki/Patch_1.60.
 
 The addon **can't make web requests**, so it can't sync with the website by itself. It's useful on its own first.
 
-## Addon v0.1 (in `addon/PartyPlanner`)
+## Addon v0.1 (in `addon/Muster`)
 
 - **Local snapshot** of your character: name, realm, class, race, faction, level, zone, active quests (ID, title, level, done), with time and source. Saved per character in SavedVariables.
 - **Party sharing:** when you're in a group, the addon sends your level, class and active quest IDs to party members who also run it, and builds a list of theirs.
-- `/pp`: your status and who in your group runs the addon. `/pp shared`: quests you share with each of them, and quests they have that you don't. `/pp share on|off`: stop sending your data.
+- `/muster`: your status and who in your group runs the addon. `/muster shared`: quests you share with each of them, and quests they have that you don't. `/muster share on|off`: stop sending your data.
 - No UI frames yet, no website sync, no guild-wide sharing.
 
 ### Privacy and rules
@@ -44,14 +44,14 @@ The addon **can't make web requests**, so it can't sync with the website by itse
 
 ## Offline tests
 
-`pnpm --filter @party/addon test` runs the addon in simulated clients with a fake WoW API (see [addon/README.md](../addon/README.md)). They found one real gap before launch: after a `/reload` in a group, the addon didn't ask the others for their quests. Fixed.
+`pnpm --filter @muster/addon test` runs the addon in simulated clients with a fake WoW API (see [addon/README.md](../addon/README.md)). They found one real gap before launch: after a `/reload` in a group, the addon didn't ask the others for their quests. Fixed.
 
 ## In-game checklist (launch day, 4 November)
 
 1. At launch: find the live install folder and `## Interface` number; update the TOC.
 2. Load the addon, check for Lua errors (`/console scriptErrors 1`).
-3. `/pp` shows the right level, zone and quests; check quest IDs match Wowhead's Forever pages.
-4. Two players in a party: `/pp shared` lists the right overlap. Try in the open world, in a dungeon, and during combat.
+3. `/muster` shows the right level, zone and quests; check quest IDs match Wowhead's Forever pages.
+4. Two players in a party: `/muster shared` lists the right overlap. Try in the open world, in a dungeon, and during combat.
 5. Check that `SendAddonMessage` returns success and isn't silently blocked in instances.
 6. Check `C_QuestLog.IsQuestFlaggedCompleted` for completed quests (needed for "who already did this").
 7. Check the Battle.net API for a Forever profile namespace (data path 2).

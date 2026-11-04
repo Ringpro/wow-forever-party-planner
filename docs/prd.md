@@ -1,4 +1,4 @@
-# Party Planner — Product Requirements (PRD)
+# Muster — Product Requirements (PRD)
 
 > Source: [product-brief.md](product-brief.md). Architecture: [architecture.md](architecture.md). Distribution: [distribution.md](distribution.md).
 >

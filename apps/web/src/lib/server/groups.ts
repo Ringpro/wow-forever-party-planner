@@ -1,7 +1,7 @@
 // Group use cases. Every function takes the acting user and checks membership/role itself
 // (architecture §5.1), so pages and Discord handlers can't skip the check.
-import { schema, type Db } from "@party/db";
-import { isValidTimeZone } from "@party/domain";
+import { schema, type Db } from "@muster/db";
+import { isValidTimeZone } from "@muster/domain";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { randomToken } from "./crypto.ts";
 import { UserError } from "./users.ts";

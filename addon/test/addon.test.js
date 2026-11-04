@@ -23,7 +23,7 @@ describe("snapshot", () => {
     anders.fire("QUEST_LOG_UPDATE");
     world.advance(3);
 
-    const snapshot = anders.get('PartyPlannerDB.characters["Anders-Firemaw"]');
+    const snapshot = anders.get('MusterDB.characters["Anders-Firemaw"]');
     expect(snapshot).toMatchObject({ name: "Anders", realm: "Firemaw", level: 23, zone: "Elwynn Forest", source: "addon" });
     expect(snapshot.quests).toEqual([
       { id: 54, title: "The Fargodeep Mine", level: 20, done: false },
@@ -62,7 +62,7 @@ describe("sharing with the group", () => {
     expect(anders.sent().every((m) => m.channel === "PARTY")).toBe(true);
   });
 
-  it("explains the overlap with /pp shared", async () => {
+  it("explains the overlap with /muster shared", async () => {
     const anders = await world.addPlayer({ name: "Anders", quests: [{ id: 20, title: "Wolves Across the Border" }, { id: 30, title: "Kobold Candles" }] });
     const bo = await world.addPlayer({ name: "Bo", quests: quests(20, 30, 40, 50) });
     anders.set("Fake.titles", { 40: "The Collector" });
@@ -165,7 +165,7 @@ describe("leaving and opting out", () => {
     expect(bo.peers()).toEqual({});
   });
 
-  it("stops sharing on /pp share off and starts again on /pp share on", async () => {
+  it("stops sharing on /muster share off and starts again on /muster share on", async () => {
     const anders = await world.addPlayer({ name: "Anders", quests: quests(1) });
     const bo = await world.addPlayer({ name: "Bo", quests: quests(1) });
     world.group(["Anders", "Bo"]);
@@ -175,7 +175,7 @@ describe("leaving and opting out", () => {
     anders.slash("share off");
     world.advance(10);
     expect(bo.peers()).toEqual({});
-    expect(anders.get("PartyPlannerDB.settings.share")).toBe(false);
+    expect(anders.get("MusterDB.settings.share")).toBe(false);
 
     // Requests from others and our own quest changes must not leak anything while off.
     const sentWhileOff = anders.sent().length;
@@ -194,10 +194,10 @@ describe("leaving and opting out", () => {
   it("keeps the opt-out after a reload", async () => {
     const anders = await world.addPlayer({ name: "Anders" });
     anders.slash("share off");
-    const saved = anders.get("PartyPlannerDB");
+    const saved = anders.get("MusterDB");
     const again = await world.addPlayer({ name: "Anders2" });
-    again.set("PartyPlannerDB", saved);
-    again.fire("ADDON_LOADED", "PartyPlanner");
+    again.set("MusterDB", saved);
+    again.fire("ADDON_LOADED", "Muster");
     expect(again.get("ADDON_NS.db.settings.share")).toBe(false);
   });
 });
@@ -221,7 +221,7 @@ describe("robustness", () => {
 
   it("ignores its own echo, other prefixes and malformed messages", async () => {
     const anders = await world.addPlayer({ name: "Anders", quests: quests(1) });
-    const prefix = "PartyPlnr";
+    const prefix = "Muster";
     anders.fire("CHAT_MSG_ADDON", prefix, "S1;1;1;1;20;WARRIOR;1", "PARTY", "Anders-Firemaw");
     anders.fire("CHAT_MSG_ADDON", "OtherAddon", "S1;1;1;1;20;WARRIOR;1", "PARTY", "Bo-Firemaw");
     for (const junk of ["", "S1", "S1;x;y;z", "S1;1;5;2;20;MAGE;1", "S1;1;1;999;20;MAGE;1", "Z9;;;"]) {
@@ -232,7 +232,7 @@ describe("robustness", () => {
 
   it("drops a half-received list when a newer one starts", async () => {
     const anders = await world.addPlayer({ name: "Anders" });
-    const prefix = "PartyPlnr";
+    const prefix = "Muster";
     anders.fire("CHAT_MSG_ADDON", prefix, "S1;7;1;2;20;MAGE;1,2", "PARTY", "Bo-Firemaw");
     anders.fire("CHAT_MSG_ADDON", prefix, "S1;8;1;1;21;MAGE;5", "PARTY", "Bo-Firemaw");
     anders.fire("CHAT_MSG_ADDON", prefix, "S1;7;2;2;20;MAGE;3,4", "PARTY", "Bo-Firemaw");

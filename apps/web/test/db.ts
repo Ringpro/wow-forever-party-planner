@@ -2,7 +2,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { getPlatformProxy } from "wrangler";
-import { createDb, schema, type Db } from "@party/db";
+import { createDb, schema, type Db } from "@muster/db";
 import { eq } from "drizzle-orm";
 import { findOrCreateDiscordUser, getUser, setTimezone } from "../src/lib/server/users.ts";
 import type { SessionUser } from "../src/lib/server/session.ts";

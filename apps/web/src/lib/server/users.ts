@@ -1,5 +1,5 @@
-import { schema, type Db } from "@party/db";
-import { isValidTimeZone } from "@party/domain";
+import { schema, type Db } from "@muster/db";
+import { isValidTimeZone } from "@muster/domain";
 import { and, eq } from "drizzle-orm";
 import type { SessionUser } from "./session.ts";
 

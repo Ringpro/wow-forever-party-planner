@@ -1,4 +1,4 @@
-import { utcToZoned, type LocalDate } from "@party/domain";
+import { utcToZoned, type LocalDate } from "@muster/domain";
 
 const dayFormat = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
 

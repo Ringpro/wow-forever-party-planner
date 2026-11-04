@@ -1,5 +1,5 @@
 // Pure renderers for Discord messages. No database or network access, so they're easy to test.
-import { addMinutesInGamingDay, isoWeekday, type LocalDate, type Status, type WallTime } from "@party/domain";
+import { addMinutesInGamingDay, isoWeekday, type LocalDate, type Status, type WallTime } from "@muster/domain";
 import { DEFAULT_START, TIME_OPTIONS, dayLabel, timeIn } from "../format.ts";
 import { row, type ActionRow, type Button, type MessagePayload } from "./types.ts";
 

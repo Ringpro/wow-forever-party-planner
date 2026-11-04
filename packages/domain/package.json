@@ -1,5 +1,5 @@
 {
-  "name": "@party/domain",
+  "name": "@muster/domain",
   "private": true,
   "type": "module",
   "exports": {

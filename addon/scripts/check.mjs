@@ -3,10 +3,10 @@
 import { readFileSync } from "node:fs";
 import luaparse from "luaparse";
 
-const ADDON = new URL("../PartyPlanner/", import.meta.url);
-const ALLOWED_GLOBALS = new Set(["PartyPlannerDB", "SLASH_PARTYPLANNER1", "SLASH_PARTYPLANNER2"]);
+const ADDON = new URL("../Muster/", import.meta.url);
+const ALLOWED_GLOBALS = new Set(["MusterDB", "SLASH_MUSTER1", "SLASH_MUSTER2"]);
 
-const toc = readFileSync(new URL("PartyPlanner.toc", ADDON), "utf8");
+const toc = readFileSync(new URL("Muster.toc", ADDON), "utf8");
 const files = toc
   .split(/\r?\n/)
   .map((line) => line.trim())

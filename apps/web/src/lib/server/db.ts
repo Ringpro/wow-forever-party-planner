@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { createDb, type Db } from "@party/db";
+import { createDb, type Db } from "@muster/db";
 
 let cached: Db | undefined;
 

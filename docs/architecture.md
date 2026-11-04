@@ -1,4 +1,4 @@
-# Party Planner — System Architecture
+# Muster — System Architecture
 
 > Requirements: [prd.md](prd.md). Brief: [product-brief.md](product-brief.md). Distribution: [distribution.md](distribution.md).
 >

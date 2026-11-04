@@ -3,9 +3,9 @@
 import { readFileSync } from "node:fs";
 import { LuaFactory } from "wasmoon";
 
-const ADDON = new URL("../PartyPlanner/", import.meta.url);
+const ADDON = new URL("../Muster/", import.meta.url);
 const FAKE_WOW = readFileSync(new URL("fake-wow.lua", import.meta.url), "utf8");
-const FILES = readFileSync(new URL("PartyPlanner.toc", ADDON), "utf8")
+const FILES = readFileSync(new URL("Muster.toc", ADDON), "utf8")
   .split(/\r?\n/)
   .map((l) => l.trim())
   .filter((l) => l && !l.startsWith("#"))
@@ -97,7 +97,7 @@ export async function createWorld() {
       player.groupId = groupId;
       refreshMembers(groupId, kind);
     }
-    player.fire("ADDON_LOADED", "PartyPlanner");
+    player.fire("ADDON_LOADED", "Muster");
     player.fire("PLAYER_LOGIN");
     return player;
   }

@@ -1,5 +1,5 @@
 {
-  "name": "@party/addon",
+  "name": "@muster/addon",
   "private": true,
   "type": "module",
   "scripts": {

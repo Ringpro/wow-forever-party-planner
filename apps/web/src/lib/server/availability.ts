@@ -1,5 +1,5 @@
 // Availability use cases: the user's own days, free-now status, and a group's week.
-import { schema, type Db } from "@party/db";
+import { schema, type Db } from "@muster/db";
 import {
   addDays,
   addMinutesInGamingDay,
@@ -20,7 +20,7 @@ import {
   type MemberInterval,
   type Status,
   type WallTime,
-} from "@party/domain";
+} from "@muster/domain";
 import { and, eq, gt, inArray } from "drizzle-orm";
 import { getGroupAsMember, type Group, type Membership } from "./groups.ts";
 import type { SessionUser } from "./session.ts";

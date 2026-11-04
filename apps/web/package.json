@@ -15,8 +15,8 @@
   },
   "dependencies": {
     "@astrojs/cloudflare": "^14.4.2",
-    "@party/db": "workspace:*",
-    "@party/domain": "workspace:*",
+    "@muster/db": "workspace:*",
+    "@muster/domain": "workspace:*",
     "astro": "^7.4.2",
     "drizzle-orm": "^0.45.4"
   },

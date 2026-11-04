@@ -36,16 +36,16 @@ function ns.Debounce(delay, fn)
 end
 
 function ns.Print(message)
-  print("|cffe3b341Party Planner|r " .. message)
+  print("|cffe3b341Muster|r " .. message)
 end
 
 ns.On("ADDON_LOADED", function(name)
   if name ~= addonName then
     return
   end
-  PartyPlannerDB = PartyPlannerDB or {}
-  PartyPlannerDB.schema = 1
-  PartyPlannerDB.characters = PartyPlannerDB.characters or {}
-  PartyPlannerDB.settings = PartyPlannerDB.settings or { share = true }
-  ns.db = PartyPlannerDB
+  MusterDB = MusterDB or {}
+  MusterDB.schema = 1
+  MusterDB.characters = MusterDB.characters or {}
+  MusterDB.settings = MusterDB.settings or { share = true }
+  ns.db = MusterDB
 end)

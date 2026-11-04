@@ -1,0 +1,12 @@
+## Interface: 16001
+## Title: Muster
+## Notes: See which quests you share with your group. Companion to the Muster website and Discord app.
+## Author: Muster contributors
+## Version: 0.1.0
+## SavedVariables: MusterDB
+## Category: Quests
+
+Core.lua
+Snapshot.lua
+Comms.lua
+Commands.lua

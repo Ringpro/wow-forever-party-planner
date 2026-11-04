@@ -1,4 +1,4 @@
--- Slash commands: /pp and /partyplanner.
+-- Slash command: /muster.
 local _, ns = ...
 
 local function displayName(sender)
@@ -21,10 +21,10 @@ local function showStatus()
     ns.Print(string.format("  %s: level %s, %d active quests", displayName(sender), peer.level or "?", ns.CountKeys(peer.quests)))
   end
   if count == 0 then
-    ns.Print(IsInGroup() and "No one else in your group runs Party Planner yet." or "Join a group to compare quests.")
+    ns.Print(IsInGroup() and "No one else in your group runs Muster yet." or "Join a group to compare quests.")
   end
   if not ns.db.settings.share then
-    ns.Print("Sharing is off. Turn it on with /pp share on.")
+    ns.Print("Sharing is off. Turn it on with /muster share on.")
   end
 end
 
@@ -51,21 +51,21 @@ local function showShared()
     end
   end
   if not any then
-    ns.Print("No group members with Party Planner to compare with.")
+    ns.Print("No group members with Muster to compare with.")
   end
 end
 
 local function setSharing(value)
   if value == "on" then
     ns.db.settings.share = true
-    ns.Print("Sharing on: your level, class and quest IDs go to group members who run Party Planner.")
+    ns.Print("Sharing on: your level, class and quest IDs go to group members who run Muster.")
     ns.SendStatus()
   elseif value == "off" then
     ns.db.settings.share = false
     ns.SendBye()
     ns.Print("Sharing off. Group members will stop seeing your quests.")
   else
-    ns.Print("Sharing is " .. (ns.db.settings.share and "on" or "off") .. ". Use /pp share on or /pp share off.")
+    ns.Print("Sharing is " .. (ns.db.settings.share and "on" or "off") .. ". Use /muster share on or /muster share off.")
   end
 end
 
@@ -77,9 +77,8 @@ function ns.CountKeys(set)
   return n
 end
 
-SLASH_PARTYPLANNER1 = "/pp"
-SLASH_PARTYPLANNER2 = "/partyplanner"
-SlashCmdList.PARTYPLANNER = function(input)
+SLASH_MUSTER1 = "/muster"
+SlashCmdList.MUSTER = function(input)
   local command, rest = strsplit(" ", strtrim(input or ""):lower(), 2)
   if command == "" then
     showStatus()
@@ -88,6 +87,6 @@ SlashCmdList.PARTYPLANNER = function(input)
   elseif command == "share" then
     setSharing(rest)
   else
-    ns.Print("/pp: your status · /pp shared: quests you share with your group · /pp share on|off")
+    ns.Print("/muster: your status · /muster shared: quests you share with your group · /muster share on|off")
   end
 end

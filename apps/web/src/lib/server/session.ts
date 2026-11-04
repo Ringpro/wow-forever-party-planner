@@ -1,8 +1,8 @@
 // Website sessions (architecture §5, B1). The cookie holds a random token; D1 stores only its hash.
 import type { AstroCookies } from "astro";
-import { schema, type Db } from "@party/db";
+import { schema, type Db } from "@muster/db";
 import { eq } from "drizzle-orm";
-import { DAY } from "@party/domain";
+import { DAY } from "@muster/domain";
 import { randomToken, sha256Hex } from "./crypto.ts";
 
 export const SESSION_COOKIE = "session";

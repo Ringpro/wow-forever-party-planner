@@ -1,6 +1,6 @@
 // Discord boards: one live message per linked channel (architecture §6.4).
 import { env } from "cloudflare:workers";
-import { schema, type Db } from "@party/db";
+import { schema, type Db } from "@muster/db";
 import { eq, inArray } from "drizzle-orm";
 import { DiscordApiError, ErrorCode, deleteMessage, editMessage, postMessage } from "../discord/api.ts";
 import { boardMessage } from "../discord/views.ts";

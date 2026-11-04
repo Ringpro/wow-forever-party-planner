@@ -1,12 +1,12 @@
 -- Sharing level, class and active quest IDs with group members who also run the addon.
 --
--- Messages (prefix "PartyPlnr", fields separated by ";"):
+-- Messages (prefix "Muster", fields separated by ";"):
 --   S1;<seq>;<part>;<parts>;<level>;<class>;<id,id,...>   status, split into parts that fit one message
 --   R1                                                      "please send me your status"
 --   B1                                                      "I stopped sharing, forget my data"
 local _, ns = ...
 
-local PREFIX = "PartyPlnr"
+local PREFIX = "Muster"
 local MAX_IDS_LENGTH = 180
 local SUCCESS = Enum.SendAddonMessageResult and Enum.SendAddonMessageResult.Success or 0
 

@@ -45,7 +45,7 @@ An addon is a folder of `.toc` / `.lua` / `.xml` files. Users extract it into th
 - Install instructions for each client, with screenshots: extract the zip to
   `World of Warcraft/<client folder>/Interface/AddOns/`
   The `<client folder>` (`_retail_`, `_classic_`, `_classic_era_`, …) depends on what "WoW Forever" turns out to be. **Confirm the target client first** (brief §13 Q1). If it's an unofficial/private server, the folder layout, Interface version and distribution conventions may all be different.
-- Common pitfalls: a nested folder after unzipping (`AddOns/PartyPlanner-1.2.0/PartyPlanner/`), "Load out of date AddOns", and restarting the game vs `/reload`.
+- Common pitfalls: a nested folder after unzipping (`AddOns/Muster-1.2.0/Muster/`), "Load out of date AddOns", and restarting the game vs `/reload`.
 - Also link the same release on **CurseForge and/or Wago**. A zip from the website never updates itself. Most players already use an addon manager, and these sites handle updates for them. The website download is the zero-account fallback.
 
 ### Packaging and trust

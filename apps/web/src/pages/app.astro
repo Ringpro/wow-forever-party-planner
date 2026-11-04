@@ -7,7 +7,7 @@ import { refreshBoardsLater } from "../lib/server/background.ts";
 import { getDb } from "../lib/server/db.ts";
 import { listMyGroups } from "../lib/server/groups.ts";
 import { UserError } from "../lib/server/users.ts";
-import { addDays } from "@party/domain";
+import { addDays } from "@muster/domain";
 
 const user = Astro.locals.user!;
 const tz = user.timezone!;

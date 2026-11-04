@@ -4,15 +4,36 @@ import Layout from "../layouts/Layout.astro";
 if (Astro.locals.user) return Astro.redirect("/app");
 ---
 
-<Layout title="Home">
-  <h1>Less time planning. More time playing together.</h1>
-  <p class="muted">
-    Mark which evenings you can play, from here or from Discord, and see when enough of your group overlaps.
-  </p>
-  <div class="card stack">
-    <a class="button discord" href="/auth/discord">Log in with Discord</a>
+<Layout title="Gather your party">
+  <section class="hero">
+    <img src="/muster.svg" width="96" height="96" alt="" />
+    <h1>Gather your party</h1>
     <p class="muted">
-      We only ask Discord for your username and ID. No messages, servers or email.
+      Mark which evenings you can play, from here or from Discord, and see when enough of your group overlaps. Less time
+      planning, more time playing together.
     </p>
-  </div>
+    <a class="button discord" href="/auth/discord">Log in with Discord</a>
+    <p class="muted small">We only ask Discord for your username and ID. No messages, servers or email.</p>
+  </section>
 </Layout>
+
+<style>
+  .hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 12px;
+    padding: 32px 0;
+  }
+  .hero img {
+    border-radius: 22px;
+  }
+  .hero h1 {
+    font-size: 2rem;
+    margin: 8px 0 0;
+  }
+  .hero p {
+    max-width: 30rem;
+  }
+</style>

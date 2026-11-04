@@ -1,6 +1,6 @@
-# WoW Party Planner — Product Brief
+# Muster — Product Brief
 
-> **Working title:** DadCraft / Party Planner (not final)
+> **Name:** Muster (chosen 2026-11-04; earlier working titles were DadCraft and Party Planner)
 >
 > **Product promise:** Less time planning. More time playing together.
 >

@@ -252,12 +252,12 @@ ADDON_NS = {}
 
 function Fake.Load(fileName, source)
   local chunk = assert(load(source, "@" .. fileName))
-  chunk("PartyPlanner", ADDON_NS)
+  chunk("Muster", ADDON_NS)
 end
 
 function Fake.Slash(input)
   Fake.printed = {}
-  SlashCmdList.PARTYPLANNER(input)
+  SlashCmdList.MUSTER(input)
   return table.concat(Fake.printed, "\n")
 end
 

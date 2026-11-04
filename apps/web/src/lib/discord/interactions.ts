@@ -1,8 +1,8 @@
 // Routes verified Discord interactions to use cases. Every handler acts as the Discord user who
 // clicked or typed; custom_ids only say what to do, never who may do it (architecture §5.1).
 import { env } from "cloudflare:workers";
-import { HOUR, minutesIntoGamingDay, type LocalDate } from "@party/domain";
-import type { Db } from "@party/db";
+import { HOUR, minutesIntoGamingDay, type LocalDate } from "@muster/domain";
+import type { Db } from "@muster/db";
 import { dayLabel } from "../format.ts";
 import {
   clearAvailability,

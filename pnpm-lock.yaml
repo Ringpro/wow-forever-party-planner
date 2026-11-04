@@ -25,10 +25,10 @@ importers:
       '@astrojs/cloudflare':
         specifier: ^14.4.2
         version: 14.4.2(@types/node@24.19.2)(astro@7.4.2(@types/node@24.19.2)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.1))(esbuild@0.28.2)(tsx@4.23.15)(workerd@1.20261019.1)(wrangler@4.152.0(@cloudflare/workers-types@5.20261023.1)(@types/node@24.19.2))(yaml@2.9.1)
-      '@party/db':
+      '@muster/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@party/domain':
+      '@muster/domain':
         specifier: workspace:*
         version: link:../../packages/domain
       astro:

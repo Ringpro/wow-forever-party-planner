@@ -1,5 +1,5 @@
 {
-  "name": "@party/db",
+  "name": "@muster/db",
   "private": true,
   "type": "module",
   "exports": {
