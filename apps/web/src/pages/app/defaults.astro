@@ -5,6 +5,7 @@ import {
   addDefaultSlot,
   getWeeklyDefaults,
   removeDefaultSlot,
+  saveWeekAsDefaults,
   setDefaultSlot,
   setDefaultStatus,
 } from "../../lib/server/availability.ts";
@@ -16,6 +17,7 @@ import { UserError } from "../../lib/server/users.ts";
 const user = Astro.locals.user!;
 const db = getDb();
 let error: string | null = null;
+const fromWeek = Astro.url.searchParams.get("saved");
 
 const WEEKDAYS = [
   [1, "Mon"],
@@ -33,6 +35,11 @@ if (Astro.request.method === "POST") {
   const action = String(form.get("action") ?? "");
   const status = String(form.get("status") ?? "");
   try {
+    if (action === "from_week") {
+      const count = await saveWeekAsDefaults(db, user);
+      refreshBoardsLater(Astro.locals, { userId: user.id });
+      return Astro.redirect(`/app/defaults?saved=${count}`);
+    }
     const slot = Number(form.get("slot") ?? 0);
     if (action === "status") await setDefaultStatus(db, user, weekday, status);
     else if (action === "add_slot") await addDefaultSlot(db, user, weekday);
@@ -62,9 +69,21 @@ const defaults = await getWeeklyDefaults(db, user.id);
     <p class="muted small">
       Defaults fill in every day you haven't answered, this week and next. Then you only change the exceptions.
     </p>
+    <form method="post">
+      <button class="link small" name="action" value="from_week">Fill in from this week's answers</button>
+    </form>
   </div>
 
-  <div id="flash">{error && <p class="error" role="alert">{error}</p>}</div>
+  <div id="flash">
+    {error && <p class="error" role="alert">{error}</p>}
+    {fromWeek !== null && (
+      <p class="notice">
+        {fromWeek === "0"
+          ? "This week has no answers to copy yet."
+          : `Filled in ${fromWeek} ${fromWeek === "1" ? "day" : "days"} from this week.`}
+      </p>
+    )}
+  </div>
 
   <div class="day-list">
     {WEEKDAYS.map(([weekday, name]) => {

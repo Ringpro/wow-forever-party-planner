@@ -64,6 +64,8 @@ export const groups = sqliteTable(
     iconUrl: text("icon_url"),
     // Post a "game on" message in the group's board channels once a day when enough people can play.
     gameOnPosts: integer("game_on_posts", { mode: "boolean" }).notNull().default(false),
+    // On Sunday evening, post in the board channels mentioning whoever hasn't planned next week.
+    weeklyNudge: integer("weekly_nudge", { mode: "boolean" }).notNull().default(false),
     createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: createdAt(),
   },
@@ -208,5 +210,9 @@ export const discordBoards = sqliteTable("discord_boards", {
   gameOnDay: text("game_on_day"),
   gameOnMessageId: text("game_on_message_id"),
   gameOnHash: text("game_on_hash"),
+  // The Sunday "plan next week" post: the Monday it was for, its message and last render.
+  nudgeWeek: text("nudge_week"),
+  nudgeMessageId: text("nudge_message_id"),
+  nudgeHash: text("nudge_hash"),
   createdAt: createdAt(),
 });

@@ -312,6 +312,81 @@ export async function copyWeekForward(db: Db, user: SessionUser): Promise<number
   return copied;
 }
 
+/**
+ * Makes this week's explicit answers (Monday to Sunday) the user's weekly defaults, one weekday at
+ * a time. Weekdays without an answer keep their default. Days limited to selected groups are
+ * skipped, because defaults are shared with every group. Returns how many weekdays were saved.
+ */
+export async function saveWeekAsDefaults(db: Db, user: SessionUser): Promise<number> {
+  const monday = mondayOf(gamingDay(Date.now(), requireTimezone(user)));
+  const days = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+  const current = await myEntries(db, user.id, days);
+  let saved = 0;
+  for (const day of days) {
+    const rows = current.get(day);
+    if (!rows || rows.some((r) => r.shareScope !== "all_shared_groups")) continue;
+    const answer =
+      dayStatus(rows) === "no"
+        ? "no"
+        : rows
+            .filter((r) => r.status !== "no" && r.startLocal)
+            .map((r) => ({ status: r.status as "yes" | "maybe", startLocal: r.startLocal!, endLocal: r.endLocal }));
+    await writeDefault(db, user, isoWeekday(day), answer);
+    saved++;
+  }
+  return saved;
+}
+
+export async function hasWeeklyDefaults(db: Db, userId: string): Promise<boolean> {
+  const row = await db
+    .select({ userId: schema.weeklyDefaults.userId })
+    .from(schema.weeklyDefaults)
+    .where(eq(schema.weeklyDefaults.userId, userId))
+    .get();
+  return row !== undefined;
+}
+
+/** The Monday after `day`'s week. */
+export const nextMondayAfter = (day: LocalDate): LocalDate => addDays(mondayOf(day), 7);
+
+export type NextWeekNudge = {
+  group: Group;
+  monday: LocalDate;
+  /** Members who share with the group, by the name they go by there. */
+  members: { userId: string; displayName: string }[];
+  /** Those with nothing for next week: no answer on any day and no weekly defaults. */
+  waiting: { userId: string; displayName: string }[];
+};
+
+/** Who in a group hasn't said anything about next week yet, for the Sunday reminder. */
+export async function nextWeekNudge(db: Db, groupId: string): Promise<NextWeekNudge | null> {
+  const group = await db.select().from(schema.groups).where(eq(schema.groups.id, groupId)).get();
+  if (!group) return null;
+  const monday = nextMondayAfter(gamingDay(Date.now(), group.timezone));
+  const days = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+  // One day is enough here: it brings the member names, with server nicknames applied.
+  const view = await loadWeek(db, group, [monday]);
+  const sharing = await db
+    .select({ userId: schema.groupMemberships.userId })
+    .from(schema.groupMemberships)
+    .where(and(eq(schema.groupMemberships.groupId, groupId), eq(schema.groupMemberships.shareAvailability, true)));
+  const ids = sharing.map((s) => s.userId);
+  const members = view.members.filter((m) => ids.includes(m.userId)).map(({ userId, displayName }) => ({ userId, displayName }));
+  if (ids.length === 0) return { group, monday, members, waiting: [] };
+  const [answered, withDefaults] = await Promise.all([
+    db
+      .selectDistinct({ userId: schema.availabilityEntries.userId })
+      .from(schema.availabilityEntries)
+      .where(and(inArray(schema.availabilityEntries.userId, ids), inArray(schema.availabilityEntries.localDate, days))),
+    db
+      .selectDistinct({ userId: schema.weeklyDefaults.userId })
+      .from(schema.weeklyDefaults)
+      .where(inArray(schema.weeklyDefaults.userId, ids)),
+  ]);
+  const planned = new Set([...answered, ...withDefaults].map((r) => r.userId));
+  return { group, monday, members, waiting: members.filter((m) => !planned.has(m.userId)) };
+}
+
 // ── Weekly defaults (PRD M4) ─────────────────────────────────────────────────────────────
 
 const WEEKDAYS: readonly IsoWeekday[] = [1, 2, 3, 4, 5, 6, 7];

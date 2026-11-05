@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { BOT_PERMISSIONS, serverInstallUrl, userInstallUrl } from "./install.ts";
 import { allComponents, cardText, COMPONENTS_V2, hasPermission, Permission, type MessagePayload } from "./types.ts";
 import { gameOnAction, gameOnMessage } from "./game-on.ts";
+import { nudgeAction, nudgeMessage } from "./nudge.ts";
 import { verifyDiscordRequest } from "./verify.ts";
 import { BOARD_DOT, boardMessage, delayMessage, fromHhmm, hhmm, plannerMessage, whoMessage } from "./views.ts";
 
@@ -288,5 +289,60 @@ describe("game on", () => {
     const few = gameOnMessage({ ...input, day: { ...input.day, best: null, members: members.slice(0, 2) } });
     expect(cardText(few)).toContain("Only 2 said Yes now, 3 needed.");
     expect(m.allowed_mentions).toEqual({ parse: [] });
+  });
+});
+
+describe("Sunday reminder", () => {
+  const tz = "Europe/Copenhagen"; // UTC+1 in November
+  const sunday = "2026-11-08";
+  const base = { enabled: true, today: sunday, nudgedWeek: null, hasMessage: false, tz };
+  const now = (day: string, localTime: string) => Date.parse(`${day}T${localTime}:00+01:00`);
+
+  it("posts on Sunday evening only, once per week", () => {
+    expect(nudgeAction({ ...base, now: now(sunday, "17:59") })).toBe("none");
+    expect(nudgeAction({ ...base, now: now(sunday, "18:00") })).toBe("post");
+    expect(nudgeAction({ ...base, now: now(sunday, "21:59") })).toBe("post");
+    expect(nudgeAction({ ...base, now: now(sunday, "22:00") })).toBe("none");
+    expect(nudgeAction({ ...base, enabled: false, now: now(sunday, "19:00") })).toBe("none");
+    expect(nudgeAction({ ...base, today: "2026-11-07", now: now("2026-11-07", "19:00") })).toBe("none");
+    expect(nudgeAction({ ...base, nudgedWeek: "2026-11-02", now: now(sunday, "19:00") })).toBe("post");
+  });
+
+  it("keeps this week's post up to date for the rest of Sunday", () => {
+    const posted = { ...base, nudgedWeek: "2026-11-09", hasMessage: true };
+    expect(nudgeAction({ ...posted, now: now(sunday, "23:30") })).toBe("update");
+    expect(nudgeAction({ ...posted, hasMessage: false, now: now(sunday, "19:00") })).toBe("none");
+    expect(nudgeAction({ ...posted, today: "2026-11-09", now: now("2026-11-09", "19:00") })).toBe("none");
+  });
+
+  const members = [
+    { userId: "u1", displayName: "Anders" },
+    { userId: "u2", displayName: "Bo" },
+    { userId: "u3", displayName: "Carsten" },
+  ];
+  const input = {
+    groupId: "g1",
+    groupName: "The Dads",
+    monday: "2026-11-09",
+    members,
+    waiting: members.slice(1),
+    mentions: new Map([["u1", "111111111111"], ["u2", "222222222222"]]),
+  };
+
+  it("mentions only the people still waiting, with one-tap buttons", () => {
+    const m = nudgeMessage(input);
+    const text = cardText(m);
+    expect(text).toContain("Next week · Mon 9 Nov – Sun 15 Nov");
+    expect(text).toContain("Still waiting on <@222222222222>, **Carsten**.");
+    expect(text).toContain("1 of 3 have planned.");
+    expect(text).not.toContain("<@111111111111>");
+    expect(m.allowed_mentions).toEqual({ parse: [], users: ["222222222222"] });
+    expect(ids(m)).toEqual(["nw:copy:g1", "nw:usual:g1", "nw:plan:g1"]);
+  });
+
+  it("says thanks when everyone has planned", () => {
+    const m = nudgeMessage({ ...input, waiting: [] });
+    expect(cardText(m)).toContain("Everyone has planned next week.");
+    expect(m.allowed_mentions).toEqual({ parse: [], users: [] });
   });
 });

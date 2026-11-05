@@ -4,8 +4,9 @@ import { schema, type Db } from "@muster/db";
 import { eq, inArray } from "drizzle-orm";
 import { DiscordApiError, ErrorCode, deleteMessage, editMessage, postMessage } from "../discord/api.ts";
 import { gameOnAction, gameOnMessage } from "../discord/game-on.ts";
+import { nudgeAction, nudgeMessage } from "../discord/nudge.ts";
 import { boardMessage } from "../discord/views.ts";
-import { boardWeek, type WeekView } from "./availability.ts";
+import { boardWeek, nextWeekNudge, type WeekView } from "./availability.ts";
 import { sha256Hex } from "./crypto.ts";
 import { getGroupAsMember } from "./groups.ts";
 import { UserError, discordIdsFor } from "./users.ts";
@@ -96,6 +97,7 @@ async function refreshBoard(db: Db, board: Board): Promise<void> {
   const loaded = await loadBoard(db, board.groupId);
   if (!loaded) return;
   await syncGameOn(db, board, loaded.week, loaded.mentions);
+  await syncNudge(db, board, loaded.week, loaded.mentions);
   const { message } = loaded;
   const hash = await sha256Hex(JSON.stringify(message));
   if (hash === board.lastRenderHash && board.messageId) return;
@@ -182,6 +184,64 @@ async function syncGameOn(db: Db, board: Board, week: WeekView, mentions: Map<st
       await db
         .update(schema.discordBoards)
         .set({ gameOnDay: today.day, gameOnMessageId: null })
+        .where(eq(schema.discordBoards.id, board.id));
+    }
+  }
+}
+
+/** Posts the Sunday "plan next week" reminder when it's time, and keeps it up to date that evening. */
+async function syncNudge(db: Db, board: Board, week: WeekView, mentions: Map<string, string>): Promise<void> {
+  const today = week.days[0];
+  if (!today) return;
+  const action = nudgeAction({
+    enabled: week.group.weeklyNudge,
+    today: today.day,
+    nudgedWeek: board.nudgeWeek,
+    hasMessage: board.nudgeMessageId !== null,
+    now: Date.now(),
+    tz: week.group.timezone,
+  });
+  if (action === "none") return;
+
+  const status = await nextWeekNudge(db, board.groupId);
+  if (!status) return;
+  // Nobody to remind: check again next minute (someone may still join or clear their week).
+  if (action === "post" && status.waiting.length === 0) return;
+  const message = nudgeMessage({
+    groupId: board.groupId,
+    groupName: week.group.name,
+    monday: status.monday,
+    members: status.members,
+    waiting: status.waiting,
+    mentions,
+  });
+  const hash = await sha256Hex(JSON.stringify(message));
+  if (action === "update" && hash === board.nudgeHash) return;
+
+  try {
+    if (action === "post") {
+      const posted = await postMessage(board.channelId, message);
+      console.log(JSON.stringify({ event: "nudge_posted", boardId: board.id, waiting: status.waiting.length }));
+      await db
+        .update(schema.discordBoards)
+        .set({ nudgeWeek: status.monday, nudgeMessageId: posted.id, nudgeHash: hash })
+        .where(eq(schema.discordBoards.id, board.id));
+    } else {
+      await editMessage(board.channelId, board.nudgeMessageId!, message);
+      await db.update(schema.discordBoards).set({ nudgeHash: hash }).where(eq(schema.discordBoards.id, board.id));
+    }
+  } catch (e) {
+    if (!(e instanceof DiscordApiError)) throw e;
+    if (e.code === ErrorCode.UnknownMessage) {
+      await db.update(schema.discordBoards).set({ nudgeMessageId: null }).where(eq(schema.discordBoards.id, board.id));
+      return;
+    }
+    console.log(JSON.stringify({ event: "nudge_failed", boardId: board.id, status: e.status, code: e.code }));
+    if (action === "post") {
+      // Don't retry every minute for the rest of the evening.
+      await db
+        .update(schema.discordBoards)
+        .set({ nudgeWeek: status.monday, nudgeMessageId: null })
         .where(eq(schema.discordBoards.id, board.id));
     }
   }

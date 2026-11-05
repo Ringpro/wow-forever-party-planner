@@ -6,9 +6,11 @@ import { dayLabel } from "../../lib/format.ts";
 import {
   addSlot,
   copyWeekForward,
+  hasWeeklyDefaults,
   myDays,
   planningWeeks,
   removeSlot,
+  saveWeekAsDefaults,
   setDayStatus,
   setSlot,
 } from "../../lib/server/availability.ts";
@@ -21,12 +23,18 @@ const tz = user.timezone!;
 const db = getDb();
 let error: string | null = null;
 const copied = Astro.url.searchParams.get("copied");
+const usual = Astro.url.searchParams.get("usual");
+const plural = (n: string) => `${n} ${n === "1" ? "day" : "days"}`;
 const notice =
-  copied === null
-    ? null
-    : copied === "0"
+  copied !== null
+    ? copied === "0"
       ? "Nothing to copy: next week already has answers for those days, or this week is empty."
-      : `Copied ${copied} ${copied === "1" ? "day" : "days"} to next week.`;
+      : `Copied ${plural(copied)} to next week.`
+    : usual !== null
+      ? usual === "0"
+        ? "Nothing to save yet: answer some days this week first."
+        : `Saved ${plural(usual)} as your usual week. Days you leave empty now use it.`
+      : null;
 
 if (Astro.request.method === "POST") {
   const form = await Astro.request.formData();
@@ -38,6 +46,11 @@ if (Astro.request.method === "POST") {
       const count = await copyWeekForward(db, user);
       refreshBoardsLater(Astro.locals, { userId: user.id });
       return Astro.redirect(`/app/schedule?copied=${count}#week-next`);
+    }
+    if (action === "usual_week") {
+      const count = await saveWeekAsDefaults(db, user);
+      refreshBoardsLater(Astro.locals, { userId: user.id });
+      return Astro.redirect(`/app/schedule?usual=${count}`);
     }
     if (action === "status") await setDayStatus(db, user, day, String(form.get("status") ?? ""), "web");
     else if (action === "add_slot") await addSlot(db, user, day, "web");
@@ -67,6 +80,9 @@ if (Astro.request.method === "POST") {
 const weeks = planningWeeks(tz);
 const today = weeks[0]!.days[0]!;
 const answers = await myDays(db, user.id, weeks.flatMap((w) => w.days));
+// People who answer week by week but have no usual week get a nudge to save one.
+const offerUsual =
+  !(await hasWeeklyDefaults(db, user.id)) && weeks[0]!.days.some((d) => answers.get(d)?.kind === "explicit");
 const range = (monday: string) => `${dayLabel(monday).slice(4)} – ${dayLabel(addDays(monday, 6)).slice(4)}`;
 ---
 
@@ -83,6 +99,19 @@ const range = (monday: string) => `${dayLabel(monday).slice(4)} – ${dayLabel(a
     {error && <p class="error" role="alert">{error}</p>}
     {notice && <p class="notice">{notice}</p>}
   </div>
+
+  {offerUsual && (
+    <form method="post" class="usual card">
+      <div>
+        <strong>Play the same nights most weeks?</strong>
+        <p class="muted small">
+          Make this week your usual week. Days you leave empty then fill in by themselves, and you only change the
+          exceptions.
+        </p>
+      </div>
+      <button class="button" name="action" value="usual_week">Make it my usual week</button>
+    </form>
+  )}
 
   {weeks.map((week) => (
     <section id={`week-${week.key}`}>
@@ -124,3 +153,16 @@ const range = (monday: string) => `${dayLabel(monday).slice(4)} – ${dayLabel(a
 <script>
   import "../../scripts/rows.ts";
 </script>
+
+<style>
+  .usual {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px 20px;
+  }
+  .usual p {
+    margin: 4px 0 0;
+  }
+</style>

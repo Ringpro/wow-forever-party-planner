@@ -46,6 +46,7 @@ if (Astro.request.method === "POST") {
         timezone: String(form.get("timezone") ?? ""),
         minPlayers: Number(form.get("minPlayers")),
         gameOnPosts: form.get("gameOnPosts") === "on",
+        weeklyNudge: form.get("weeklyNudge") === "on",
       });
     } else if (action === "create_squad") {
       const squadId = await createSquad(db, user.id, groupId, {
@@ -353,6 +354,15 @@ const kindLabel = kind === "server" ? "Discord server" : kind === "squad" ? `Squ
               Post "game on" in the board channel when enough people can play
               <span class="muted small block">
                 Once a day, not before 10:00. Mentions the people who said Yes. Needs a board (<code>/board setup</code>).
+              </span>
+            </span>
+          </label>
+          <label class="check game-on">
+            <input type="checkbox" name="weeklyNudge" checked={group.weeklyNudge} />
+            <span>
+              Remind people to plan next week, on Sunday evening
+              <span class="muted small block">
+                Posts in the board channel around 18:00 and mentions only those with nothing planned for next week.
               </span>
             </span>
           </label>

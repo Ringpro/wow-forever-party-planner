@@ -7,6 +7,10 @@ import { dayLabel } from "../format.ts";
 import {
   clearAvailability,
   clearFreeNow,
+  copyWeekForward,
+  hasWeeklyDefaults,
+  nextMondayAfter,
+  saveWeekAsDefaults,
   groupWeek,
   moveStart,
   addSlot,
@@ -21,7 +25,7 @@ import {
 import { setMainLevel } from "../server/characters.ts";
 import { syncFromInteraction } from "../server/discord-sync.ts";
 import { boardForChannel, refreshBoardsFor, removeBoard, setupBoard } from "../server/boards.ts";
-import { getGroupAsMember, listMyGroups, setGameOnPosts } from "../server/groups.ts";
+import { getGroupAsMember, listMyGroups, setGameOnPosts, setWeeklyNudge } from "../server/groups.ts";
 import type { SessionUser } from "../server/session.ts";
 import { UserError, discordIdsFor, findOrCreateDiscordUser, getUser, setTimezone } from "../server/users.ts";
 import {
@@ -271,30 +275,43 @@ const boardCommand: Handler = async ({ ctx, interaction, actor }) => {
   });
 };
 
-/** The reply after posting a board, with the switch for daily "game on" posts. */
-function boardPostedMessage(groupId: string, gameOn: boolean): MessagePayload {
+type BoardSwitches = { gameOn: boolean; nudge: boolean };
+
+/** The reply after posting a board, with the switches for the posts that ping people. */
+function boardPostedMessage(groupId: string, on: BoardSwitches): MessagePayload {
   return {
-    content:
-      "Board posted. It updates by itself whenever anyone changes their plans.\n" +
-      (gameOn
+    content: [
+      "Board posted. It updates by itself whenever anyone changes their plans.",
+      on.gameOn
         ? "**Game on posts are on:** once a day, when enough people said Yes for tonight, I'll post here and mention them."
-        : "Want a ping when a game comes together? Turn on **game on posts**: once a day, when enough people said Yes for tonight, I'll post here and mention them."),
+        : "**Game on posts** (off): once a day, when enough people said Yes for tonight, I'll post here and mention them.",
+      on.nudge
+        ? "**Sunday reminders are on:** on Sunday evening I'll mention whoever hasn't planned next week."
+        : "**Sunday reminders** (off): on Sunday evening I'll mention whoever hasn't planned next week.",
+    ].join("\n"),
     components: [
       row(
-        gameOn
+        on.gameOn
           ? { type: 2, style: 2, label: "Turn off game on posts", custom_id: `gs:off:${groupId}` }
           : { type: 2, style: 3, label: "Turn on game on posts", custom_id: `gs:on:${groupId}` },
+        on.nudge
+          ? { type: 2, style: 2, label: "Turn off Sunday reminders", custom_id: `ns:off:${groupId}` }
+          : { type: 2, style: 3, label: "Turn on Sunday reminders", custom_id: `ns:on:${groupId}` },
       ),
     ],
   };
+}
+
+async function boardSwitches(ctx: InteractionContext, actorId: string, groupId: string): Promise<BoardSwitches> {
+  const access = await getGroupAsMember(ctx.db, actorId, groupId);
+  return { gameOn: access?.group.gameOnPosts ?? false, nudge: access?.group.weeklyNudge ?? false };
 }
 
 const pickBoardGroup: Handler = async ({ ctx, interaction, actor }) => {
   const target = requireManageChannels(interaction);
   const groupId = interaction.data?.values?.[0] ?? "";
   await setupBoard(ctx.db, actor.id, { groupId, ...target });
-  const access = await getGroupAsMember(ctx.db, actor.id, groupId);
-  return update(boardPostedMessage(groupId, access?.group.gameOnPosts ?? false));
+  return update(boardPostedMessage(groupId, await boardSwitches(ctx, actor.id, groupId)));
 };
 
 /** "Game on" buttons: Count me in adds a Yes at tonight's start, I'm out says can't play. */
@@ -324,7 +341,66 @@ const toggleGameOn: Handler = async ({ ctx, interaction, actor, parts }) => {
   requireManageChannels(interaction);
   await setGameOnPosts(ctx.db, actor.id, groupId, on);
   ctx.waitUntil(refreshBoardsFor(ctx.db, { groupIds: [groupId] }));
-  return update(boardPostedMessage(groupId, on));
+  return update(boardPostedMessage(groupId, await boardSwitches(ctx, actor.id, groupId)));
+};
+
+const toggleNudge: Handler = async ({ ctx, interaction, actor, parts }) => {
+  const on = parts[1] === "on";
+  const groupId = parts[2] ?? "";
+  requireManageChannels(interaction);
+  await setWeeklyNudge(ctx.db, actor.id, groupId, on);
+  return update(boardPostedMessage(groupId, await boardSwitches(ctx, actor.id, groupId)));
+};
+
+// ── Sunday "plan next week" buttons ──────────────────────────────────────────────────────
+
+const usualWeekButton = (groupId: string) =>
+  ({ type: 2, style: 1, label: "Make it my usual week", custom_id: `nw:usual:${groupId}` }) as const;
+const planNextWeekButton = (groupId: string) =>
+  ({ type: 2, style: 2, label: "Plan next week", custom_id: `nw:plan:${groupId}` }) as const;
+
+const nudgeCopy: Handler = async ({ ctx, actor, parts }) => {
+  const groupId = parts[2] ?? "";
+  await requireMember(ctx, actor.id, groupId);
+  const copied = await copyWeekForward(ctx.db, actor);
+  if (copied === 0) {
+    return reply({
+      content: "Nothing to copy: this week has no answers yet, or next week already has them. Plan next week instead?",
+      components: [row(planNextWeekButton(groupId))],
+    });
+  }
+  refresh(ctx, actor.id);
+  const usual = await hasWeeklyDefaults(ctx.db, actor.id);
+  return reply({
+    content:
+      `Copied ${copied} ${copied === 1 ? "day" : "days"} to next week.` +
+      (usual ? "" : "\nSame nights most weeks? Make this your usual week and you won't have to do this again."),
+    components: [row(...(usual ? [] : [usualWeekButton(groupId)]), planNextWeekButton(groupId))],
+  });
+};
+
+const nudgeUsual: Handler = async ({ ctx, actor, parts }) => {
+  const groupId = parts[2] ?? "";
+  await requireMember(ctx, actor.id, groupId);
+  const saved = await saveWeekAsDefaults(ctx.db, actor);
+  if (saved === 0) {
+    return reply({
+      content: "This week has no answers to save yet. Plan next week instead?",
+      components: [row(planNextWeekButton(groupId))],
+    });
+  }
+  refresh(ctx, actor.id);
+  return reply({
+    content:
+      `Saved ${saved} ${saved === 1 ? "day" : "days"} as your usual week. Any day you don't answer now uses it, ` +
+      `so you're covered next week. Change it any time: ${env.PUBLIC_BASE_URL}/app/defaults`,
+    components: [row(planNextWeekButton(groupId))],
+  });
+};
+
+const nudgePlan: Handler = async ({ ctx, actor, parts }) => {
+  await requireMember(ctx, actor.id, parts[2] ?? "");
+  return reply(await planner(ctx.db, actor, nextMondayAfter(planningDays(actor.timezone)[0]!)));
 };
 
 // ── Routing tables ───────────────────────────────────────────────────────────────────────
@@ -387,6 +463,11 @@ const COMPONENTS: Record<string, Handler> = {
   "gs:off": toggleGameOn,
   "go:in": gameOnIn,
   "go:out": gameOnOut,
+  "ns:on": toggleNudge,
+  "ns:off": toggleNudge,
+  "nw:copy": nudgeCopy,
+  "nw:usual": nudgeUsual,
+  "nw:plan": nudgePlan,
   "bd:plan": async ({ ctx, actor, parts }) => {
     await requireMember(ctx, actor.id, parts[2] ?? "");
     return reply(await planner(ctx.db, actor));

@@ -228,7 +228,7 @@ export async function updateGroupSettings(
   db: Db,
   actorId: string,
   groupId: string,
-  input: { timezone: string; minPlayers: number; gameOnPosts?: boolean },
+  input: { timezone: string; minPlayers: number; gameOnPosts?: boolean; weeklyNudge?: boolean },
 ): Promise<void> {
   await requireAdmin(db, actorId, groupId);
   if (!isValidTimeZone(input.timezone)) throw new UserError("Unknown time zone.");
@@ -241,6 +241,7 @@ export async function updateGroupSettings(
       timezone: input.timezone,
       minPlayers: input.minPlayers,
       ...(input.gameOnPosts === undefined ? {} : { gameOnPosts: input.gameOnPosts }),
+      ...(input.weeklyNudge === undefined ? {} : { weeklyNudge: input.weeklyNudge }),
     })
     .where(eq(schema.groups.id, groupId));
 }
@@ -253,6 +254,12 @@ export async function updateGroupSettings(
 export async function setGameOnPosts(db: Db, actorId: string, groupId: string, on: boolean): Promise<void> {
   await requireAdmin(db, actorId, groupId);
   await db.update(schema.groups).set({ gameOnPosts: on }).where(eq(schema.groups.id, groupId));
+}
+
+/** Turns the Sunday "plan next week" reminder on or off for a group's boards. Admins only. */
+export async function setWeeklyNudge(db: Db, actorId: string, groupId: string, on: boolean): Promise<void> {
+  await requireAdmin(db, actorId, groupId);
+  await db.update(schema.groups).set({ weeklyNudge: on }).where(eq(schema.groups.id, groupId));
 }
 
 export type DiscordServer = { guildId: string; name: string; iconUrl: string | null };
