@@ -474,3 +474,41 @@ export async function serverGroupFor(db: Db, guildId: string): Promise<Group | u
     .where(and(eq(schema.groups.discordGuildId, guildId), isNull(schema.groups.parentGroupId)))
     .get();
 }
+
+/** Takes someone out of a Discord server's group and its squads (only memberships Discord made). */
+export async function leaveServer(db: Db, userId: string, serverGroupId: string): Promise<void> {
+  const squads = await db
+    .select({ id: schema.groups.id })
+    .from(schema.groups)
+    .where(eq(schema.groups.parentGroupId, serverGroupId));
+  await db
+    .delete(schema.groupMemberships)
+    .where(
+      and(
+        eq(schema.groupMemberships.userId, userId),
+        eq(schema.groupMemberships.source, "discord"),
+        inArray(schema.groupMemberships.groupId, [serverGroupId, ...squads.map((s) => s.id)]),
+      ),
+    );
+}
+
+/** Saves someone's nickname in a Discord server (null = none). Returns whether it changed. */
+export async function setServerNickname(
+  db: Db,
+  userId: string,
+  serverGroupId: string,
+  nickname: string | null | undefined,
+): Promise<boolean> {
+  const nick = nickname?.trim().slice(0, 80) || null;
+  const current = await db
+    .select({ nickname: schema.groupMemberships.nickname })
+    .from(schema.groupMemberships)
+    .where(and(eq(schema.groupMemberships.groupId, serverGroupId), eq(schema.groupMemberships.userId, userId)))
+    .get();
+  if (!current || current.nickname === nick) return false;
+  await db
+    .update(schema.groupMemberships)
+    .set({ nickname: nick })
+    .where(and(eq(schema.groupMemberships.groupId, serverGroupId), eq(schema.groupMemberships.userId, userId)));
+  return true;
+}

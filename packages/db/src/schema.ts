@@ -85,6 +85,9 @@ export const groupMemberships = sqliteTable(
     // Set once the user has chosen whether to share with this group. Servers found at login start
     // unshared and undecided, so the website can ask instead of sharing silently.
     shareDecidedAt: integer("share_decided_at"),
+    // For a Discord server's group: the person's nickname in that server, shown there instead of
+    // their Discord name (and in the server's squads). Null when they have none.
+    nickname: text("nickname"),
     joinedAt: integer("joined_at").notNull().default(now),
   },
   (t) => [primaryKey({ columns: [t.groupId, t.userId] }), index("group_memberships_user").on(t.userId)],

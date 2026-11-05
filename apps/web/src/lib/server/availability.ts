@@ -25,7 +25,7 @@ import {
   type WallTime,
   type WeeklyDefaults,
 } from "@muster/domain";
-import { and, eq, gt, inArray } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull } from "drizzle-orm";
 import { mainCharacters, type MainCharacter } from "./characters.ts";
 import { getGroupAsMember, type Group, type Membership } from "./groups.ts";
 import type { SessionUser } from "./session.ts";
@@ -591,6 +591,17 @@ async function loadWeek(db: Db, group: Group, days: LocalDate[]): Promise<WeekVi
     .from(schema.groupMemberships)
     .innerJoin(schema.users, eq(schema.users.id, schema.groupMemberships.userId))
     .where(eq(schema.groupMemberships.groupId, groupId));
+
+  // In a Discord server and its squads, people go by their nickname there, like in Discord.
+  const serverGroupId = group.parentGroupId ?? (group.discordGuildId ? group.id : null);
+  if (serverGroupId) {
+    const nicknames = await db
+      .select({ userId: schema.groupMemberships.userId, nickname: schema.groupMemberships.nickname })
+      .from(schema.groupMemberships)
+      .where(and(eq(schema.groupMemberships.groupId, serverGroupId), isNotNull(schema.groupMemberships.nickname)));
+    const nickOf = new Map(nicknames.map((n) => [n.userId, n.nickname!]));
+    for (const m of members) m.displayName = nickOf.get(m.userId) ?? m.displayName;
+  }
   members.sort((a, b) => a.displayName.localeCompare(b.displayName));
 
   const sharingIds = members.filter((m) => m.shareAvailability).map((m) => m.userId);

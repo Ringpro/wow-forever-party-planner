@@ -1,9 +1,18 @@
 // Keeps server groups and squads in line with Discord (architecture §4.6): at website login from
 // the user's server list, and on every interaction in a server from the member data Discord sends.
-import type { Db } from "@muster/db";
+import { schema, type Db } from "@muster/db";
+import { and, eq } from "drizzle-orm";
 import { DiscordApiError, discordApi } from "../discord/api.ts";
 import type { Interaction } from "../discord/types.ts";
-import { ensureServerGroup, serverGroupFor, syncServerMemberships, syncSquadMemberships } from "./groups.ts";
+import {
+  ensureServerGroup,
+  leaveServer,
+  serverGroupFor,
+  setServerNickname,
+  syncServerMemberships,
+  syncSquadMemberships,
+} from "./groups.ts";
+import { renameUser } from "./users.ts";
 
 const ADMINISTRATOR = 1n << 3n;
 const MANAGE_GUILD = 1n << 5n;
@@ -23,6 +32,12 @@ export function canManageServer(permissions: string | undefined, owner = false):
   return (bits & ADMINISTRATOR) !== 0n || (bits & MANAGE_GUILD) !== 0n;
 }
 
+type GuildMember = {
+  roles: string[];
+  nick?: string | null;
+  user?: { id: string; username: string; global_name?: string | null };
+};
+
 let botGuildCache: { at: number; ids: Set<string> } | undefined;
 
 /** Servers the bot is in. Cached briefly; logins come in bursts at most. */
@@ -33,11 +48,10 @@ async function botGuildIds(): Promise<Set<string>> {
   return botGuildCache.ids;
 }
 
-/** A member's role IDs in a server, read with the bot token. Null if they aren't in it. */
-async function memberRoles(guildId: string, discordUserId: string): Promise<string[] | null> {
+/** A member's roles and nickname in a server, read with the bot token. Null if they aren't in it. */
+async function guildMember(guildId: string, discordUserId: string): Promise<GuildMember | null> {
   try {
-    const member = await discordApi<{ roles: string[] }>("GET", `/guilds/${guildId}/members/${discordUserId}`);
-    return member.roles;
+    return await discordApi<GuildMember>("GET", `/guilds/${guildId}/members/${discordUserId}`);
   } catch (e) {
     if (e instanceof DiscordApiError && e.status === 404) return null;
     throw e;
@@ -85,8 +99,10 @@ export async function syncAtLogin(
     { complete: true, shareByDefault: false },
   );
   for (const { group } of servers) {
-    const roles = await memberRoles(group.discordGuildId!, discordUserId);
-    if (roles) await syncSquadMemberships(db, userId, group.id, roles);
+    const member = await guildMember(group.discordGuildId!, discordUserId);
+    if (!member) continue;
+    await syncSquadMemberships(db, userId, group.id, member.roles);
+    await setServerNickname(db, userId, group.id, member.nick);
   }
 }
 
@@ -115,4 +131,45 @@ export async function syncFromInteraction(db: Db, userId: string, interaction: I
     shareByDefault: true,
   });
   await syncSquadMemberships(db, userId, group.id, member.roles ?? []);
+  await setServerNickname(db, userId, group.id, member.nick);
+}
+
+
+/**
+ * The regular check of one server's members, for changes nobody tells Muster about (Discord only
+ * sends member events over its Gateway, which Muster doesn't use): people who left the server lose
+ * the group and its squads, everyone else gets their current name and squads. Returns whether
+ * anything changed, so the caller can redraw boards.
+ */
+export async function checkServerMembers(db: Db, serverGroupId: string, guildId: string): Promise<boolean> {
+  const members = await db
+    .select({ userId: schema.groupMemberships.userId, discordId: schema.userIdentities.externalId })
+    .from(schema.groupMemberships)
+    .innerJoin(
+      schema.userIdentities,
+      and(eq(schema.userIdentities.userId, schema.groupMemberships.userId), eq(schema.userIdentities.provider, "discord")),
+    )
+    .where(and(eq(schema.groupMemberships.groupId, serverGroupId), eq(schema.groupMemberships.source, "discord")));
+
+  let changed = false;
+  for (const m of members) {
+    let member: GuildMember | null;
+    try {
+      member = await discordApi<GuildMember>("GET", `/guilds/${guildId}/members/${m.discordId}`);
+    } catch (e) {
+      // 404 Unknown Member: they left (or were removed). Anything else: try again next time.
+      if (!(e instanceof DiscordApiError && e.status === 404)) throw e;
+      member = null;
+    }
+    if (!member) {
+      await leaveServer(db, m.userId, serverGroupId);
+      console.log(JSON.stringify({ event: "member_left_server", groupId: serverGroupId }));
+      changed = true;
+      continue;
+    }
+    if (member.user && (await renameUser(db, m.userId, member.user.global_name ?? member.user.username))) changed = true;
+    if (await setServerNickname(db, m.userId, serverGroupId, member.nick)) changed = true;
+    await syncSquadMemberships(db, m.userId, serverGroupId, member.roles);
+  }
+  return changed;
 }

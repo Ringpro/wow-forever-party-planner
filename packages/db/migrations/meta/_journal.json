@@ -43,6 +43,13 @@
       "when": 1793822964248,
       "tag": "0005_productive_marten_broadcloak",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1793896282590,
+      "tag": "0006_classy_william_stryker",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,6 @@
 import { schema, type Db } from "@muster/db";
 import { isValidTimeZone } from "@muster/domain";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import type { SessionUser } from "./session.ts";
 
 /** Finds the user behind a Discord account, creating one on first sight (architecture §4.1). */
@@ -20,6 +20,8 @@ export async function findOrCreateDiscordUser(
         .set({ username: discord.username })
         .where(and(eq(schema.userIdentities.provider, "discord"), eq(schema.userIdentities.externalId, discord.id)));
     }
+    // Names follow Discord: someone who renames themselves there is renamed here too.
+    await renameUser(db, existing.userId, discord.displayName);
     return existing.userId;
   }
 
@@ -35,6 +37,18 @@ export async function findOrCreateDiscordUser(
     }),
   ]);
   return userId;
+}
+
+/** Sets a user's display name if it changed. Returns whether it did. */
+export async function renameUser(db: Db, userId: string, displayName: string): Promise<boolean> {
+  const name = displayName.trim().slice(0, 80);
+  if (!name) return false;
+  const result = await db
+    .update(schema.users)
+    .set({ displayName: name, updatedAt: Date.now() })
+    .where(and(eq(schema.users.id, userId), ne(schema.users.displayName, name)))
+    .run();
+  return (result.meta?.changes ?? 0) > 0;
 }
 
 export async function getUser(db: Db, userId: string): Promise<SessionUser | null> {
