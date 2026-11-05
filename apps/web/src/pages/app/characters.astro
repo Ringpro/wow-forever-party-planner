@@ -353,21 +353,21 @@ const factionName = (f: string) => (f === "alliance" ? "Alliance" : "Horde");
     color: var(--muted);
   }
   .faction-alliance.tag {
-    background: rgba(63, 110, 214, 0.18);
-    color: #8fb0f5;
+    background: var(--alliance-soft);
+    color: var(--alliance-text);
   }
   .faction-horde.tag {
-    background: rgba(196, 58, 50, 0.18);
-    color: #ef8f84;
+    background: var(--horde-soft);
+    color: var(--horde-text);
   }
   .role-tank.tag {
-    color: #8fb0f5;
+    color: var(--alliance-text);
   }
   .role-healer.tag {
-    color: #7fd6a4;
+    color: var(--yes-text);
   }
   .role-dps.tag {
-    color: #ef8f84;
+    color: var(--horde-text);
   }
   .hero-actions {
     display: flex;
@@ -477,14 +477,14 @@ const factionName = (f: string) => (f === "alliance" ? "Alliance" : "Horde");
     min-height: 56px;
   }
   .faction-alliance:has(input:checked) {
-    border-color: #3f6ed6;
-    background: rgba(63, 110, 214, 0.2);
-    color: #b5cbf8;
+    border-color: var(--alliance);
+    background: var(--alliance-soft);
+    color: var(--alliance-text);
   }
   .faction-horde:has(input:checked) {
-    border-color: #c43a32;
-    background: rgba(196, 58, 50, 0.2);
-    color: #f5b0a8;
+    border-color: var(--horde);
+    background: var(--horde-soft);
+    color: var(--horde-text);
   }
   .classes {
     display: grid;
@@ -512,8 +512,8 @@ const factionName = (f: string) => (f === "alliance" ? "Alliance" : "Horde");
     color: var(--text);
   }
   .pill.role-tank:has(input:checked) {
-    border-color: #3f6ed6;
-    background: rgba(63, 110, 214, 0.2);
+    border-color: var(--alliance);
+    background: var(--alliance-soft);
   }
   .pill.role-healer:has(input:checked) {
     border-color: var(--yes);

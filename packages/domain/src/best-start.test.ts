@@ -12,7 +12,7 @@ function member(
   tz = "Europe/Copenhagen",
 ): MemberInterval {
   const a: AvailabilityAnswer = { status, startLocal, endLocal, tz };
-  return { memberId, status, interval: answerInterval(DAY, a, 120)! };
+  return { memberId, status, interval: answerInterval(DAY, a)! };
 }
 
 const at = (time: string) => Date.parse(`${DAY}T${time}:00+01:00`);
@@ -20,7 +20,7 @@ const at = (time: string) => Date.parse(`${DAY}T${time}:00+01:00`);
 describe("bestStart", () => {
   const dads = [
     member("anders", "yes", "20:00", "23:00"),
-    member("bo", "yes", "20:30"), // until 22:30
+    member("bo", "yes", "20:30", "22:30"),
     member("carsten", "yes", "21:00", "23:00"),
     member("dennis", "maybe", "20:30", "23:30"),
   ];
@@ -58,5 +58,12 @@ describe("bestStart", () => {
 
   it("returns null when there aren't enough players", () => {
     expect(bestStart(dads, { minPlayers: 5, minOverlapMinutes: 60 })).toBeNull();
+  });
+});
+
+describe("bestStart with late nights", () => {
+  it("counts \"until late\" as the rest of the night, so later starters still overlap", () => {
+    const night = [member("a", "yes", "20:30"), member("b", "yes", "22:00", "00:00")];
+    expect(bestStart(night, { minPlayers: 2, minOverlapMinutes: 60 })?.startsAt).toBe(at("22:00"));
   });
 });

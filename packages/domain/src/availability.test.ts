@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { answerInterval, dayStatus, resolveEffective, type AvailabilityAnswer } from "./availability.ts";
+import { answerInterval, dayIntervals, dayStatus, resolveEffective, type AvailabilityAnswer } from "./availability.ts";
 import { HOUR } from "./time.ts";
 
 const CPH = "Europe/Copenhagen";
@@ -45,30 +45,44 @@ describe("dayStatus", () => {
 });
 
 describe("answerInterval", () => {
-  it("uses the default session length without an end time", () => {
-    const i = answerInterval("2026-10-23", answer("yes", "20:30"), 120)!;
+  it("runs until the end of the night (05:00) without an end time", () => {
+    const i = answerInterval("2026-10-23", answer("yes", "20:30"))!;
     expect(i.start).toBe(Date.parse("2026-10-23T18:30:00Z"));
-    expect(i.end - i.start).toBe(2 * HOUR);
+    expect(i.end).toBe(Date.parse("2026-10-24T03:00:00Z"));
   });
 
   it("handles windows past midnight", () => {
-    const i = answerInterval("2026-10-23", answer("maybe", "21:30", "00:30"), 120)!;
+    const i = answerInterval("2026-10-23", answer("maybe", "21:30", "00:30"))!;
     expect(i.end - i.start).toBe(3 * HOUR);
   });
 
   it("puts after-midnight starts on the next calendar date", () => {
-    const i = answerInterval("2026-10-23", answer("yes", "01:00", "03:00"), 120)!;
+    const i = answerInterval("2026-10-23", answer("yes", "01:00", "03:00"))!;
     expect(i.start).toBe(Date.parse("2026-10-23T23:00:00Z"));
     expect(i.end - i.start).toBe(2 * HOUR);
   });
 
   it("measures real elapsed time across the fall-back night", () => {
-    const i = answerInterval("2026-10-24", answer("yes", "22:00", "04:00"), 120)!;
+    const i = answerInterval("2026-10-24", answer("yes", "22:00", "04:00"))!;
     expect(i.end - i.start).toBe(7 * HOUR);
   });
 
   it("returns null for no or missing start", () => {
-    expect(answerInterval("2026-10-23", answer("no", "20:00"), 120)).toBeNull();
-    expect(answerInterval("2026-10-23", answer("yes", null), 120)).toBeNull();
+    expect(answerInterval("2026-10-23", answer("no", "20:00"))).toBeNull();
+    expect(answerInterval("2026-10-23", answer("yes", null))).toBeNull();
+  });
+});
+
+describe("dayIntervals", () => {
+  it("ends an open slot where the next one starts, and the last one at the end of the night", () => {
+    const [midday, evening] = dayIntervals("2026-10-23", [answer("maybe", "12:00"), answer("yes", "20:30")]);
+    expect(midday!.end).toBe(Date.parse("2026-10-23T18:30:00Z"));
+    expect(evening!.end).toBe(Date.parse("2026-10-24T03:00:00Z"));
+  });
+
+  it("leaves slots with an end time alone", () => {
+    const [a, b] = dayIntervals("2026-10-23", [answer("yes", "12:00", "15:00"), answer("yes", "20:30", "23:00")]);
+    expect(b!.start - a!.end).toBe(5.5 * HOUR);
+    expect(b!.end - b!.start).toBe(2.5 * HOUR);
   });
 });

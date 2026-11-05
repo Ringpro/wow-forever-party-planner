@@ -245,6 +245,15 @@ describe("time slots", () => {
     expect(second).toMatchObject({ slot: 1, from: "20:30", to: addMinutesInGamingDay("20:30", 30) });
     vi.setSystemTime(new Date("2026-11-02T12:00:00Z"));
   });
+
+  it("doesn't let an open midday slot swallow the evening when running late", async () => {
+    const day = days[1]!;
+    await setSlot(db, ida, day, 0, { status: "maybe", startLocal: "12:00", endLocal: null }, "web");
+    await setSlot(db, ida, day, 1, { status: "yes", startLocal: "20:30", endLocal: null }, "web");
+    vi.setSystemTime(new Date(`${day}T19:00:00Z`)); // 20:00 local
+    expect(await shiftToday(db, ida, 30, "web")).toMatchObject({ slot: 1, from: "20:30" });
+    vi.setSystemTime(new Date("2026-11-02T12:00:00Z"));
+  });
 });
 
 describe("characters", () => {

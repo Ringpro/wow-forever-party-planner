@@ -438,16 +438,16 @@ const tonight = weeks.map((w) => {
     font-variant-numeric: tabular-nums;
   }
   .big.enough {
-    color: #7fd6a4;
+    color: var(--yes-text);
   }
   .big.possible {
-    color: #f0c45a;
+    color: var(--maybe-text);
   }
   .big.none {
     color: var(--muted);
   }
   .t-summary {
-    color: #c9c6cf;
+    color: var(--soft-text);
   }
   .people {
     display: flex;
@@ -462,10 +462,10 @@ const tonight = weeks.map((w) => {
     border-radius: 999px;
     background: var(--surface-2);
     font-size: 13px;
-    color: #9be3b9;
+    color: var(--yes-text);
   }
   .person.maybe {
-    color: #f5cf6e;
+    color: var(--maybe-text);
   }
   .person .class-dot {
     width: 8px;
@@ -597,7 +597,7 @@ const tonight = weeks.map((w) => {
     opacity: 0.4;
   }
   .cell.past {
-    background: repeating-linear-gradient(135deg, transparent 0 6px, rgba(255, 255, 255, 0.025) 6px 12px);
+    background: repeating-linear-gradient(135deg, transparent 0 6px, var(--hatch) 6px 12px);
   }
   .row-name {
     display: flex;
@@ -642,31 +642,31 @@ const tonight = weeks.map((w) => {
   }
   .enough {
     background: rgba(59, 163, 107, 0.18);
-    color: #7fd6a4;
+    color: var(--yes-text);
   }
   .possible {
     background: rgba(217, 166, 40, 0.16);
-    color: #f0c45a;
+    color: var(--maybe-text);
   }
   .none {
-    background: #1f222b;
-    color: #6f6c78;
+    background: var(--cell);
+    color: var(--cell-muted);
   }
   .me-yes {
     background: rgba(59, 163, 107, 0.22);
-    color: #9be3b9;
+    color: var(--yes-text);
   }
   .me-maybe {
     background: rgba(217, 166, 40, 0.2);
-    color: #f5cf6e;
+    color: var(--maybe-text);
   }
   .me-no {
     background: rgba(208, 87, 74, 0.16);
-    color: #ef8f84;
+    color: var(--no-text);
   }
   .me-unknown {
-    color: #6f6c78;
-    box-shadow: inset 0 0 0 1px #2d313d;
+    color: var(--cell-muted);
+    box-shadow: inset 0 0 0 1px var(--border);
   }
   .me-default {
     outline: 1px dashed currentColor;

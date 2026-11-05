@@ -1,5 +1,5 @@
 import {
-  MINUTE,
+  GAMING_DAY_ROLLOVER,
   addDays,
   calendarDateFor,
   isoWeekday,
@@ -64,23 +64,40 @@ export function resolveEffective(
 
 export type Interval = { start: number; end: number };
 
+/** When a gaming day ends (05:00 the next morning) in a time zone. */
+export function endOfGamingDay(day: LocalDate, tz: string): number {
+  return zonedToUtc(addDays(day, 1), GAMING_DAY_ROLLOVER, tz);
+}
+
 /**
  * The UTC interval an answer covers on a gaming day. Null for "no" or when there's no start time.
- * Without an end time the user's default session length is used; an end at or before the start
- * means the session runs past midnight.
+ * An end at or before the start means the session runs past midnight. Without an end time
+ * ("until late") it runs to `openEndAt`, by default the end of the gaming day.
  */
-export function answerInterval(
-  day: LocalDate,
-  answer: AvailabilityAnswer,
-  defaultSessionMinutes: number,
-): Interval | null {
+export function answerInterval(day: LocalDate, answer: AvailabilityAnswer, openEndAt?: number): Interval | null {
   if (answer.status === "no" || !answer.startLocal) return null;
 
   const startDate = calendarDateFor(day, answer.startLocal);
   const start = zonedToUtc(startDate, answer.startLocal, answer.tz);
   if (!answer.endLocal || answer.endLocal === answer.startLocal) {
-    return { start, end: start + defaultSessionMinutes * MINUTE };
+    const end = openEndAt ?? endOfGamingDay(day, answer.tz);
+    return { start, end: Math.max(end, start) };
   }
   const endDate = answer.endLocal < answer.startLocal ? addDays(startDate, 1) : startDate;
   return { start, end: zonedToUtc(endDate, answer.endLocal, answer.tz) };
+}
+
+/**
+ * Intervals for one person's slots on a day, in the same order. "Until late" runs until their
+ * next slot starts (12:00-late then 20:30-late means a break in between), or else to the end of
+ * the night.
+ */
+export function dayIntervals(day: LocalDate, answers: readonly AvailabilityAnswer[]): (Interval | null)[] {
+  const starts = answers.map((a) => answerInterval(day, a)?.start ?? null);
+  return answers.map((a, i) => {
+    const own = starts[i];
+    if (own === null || own === undefined) return null;
+    const later = starts.filter((s): s is number => s !== null && s > own);
+    return answerInterval(day, a, later.length > 0 ? Math.min(...later) : undefined);
+  });
 }

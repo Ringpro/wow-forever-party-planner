@@ -4,7 +4,9 @@ import { schema, type Db } from "@muster/db";
 import {
   addDays,
   addMinutesInGamingDay,
+  HOUR,
   answerInterval,
+  dayIntervals,
   bestStart,
   dayStatus,
   gamingDay,
@@ -114,8 +116,9 @@ async function writeDay(
       ? [{ status: "no" as const, startLocal: null, endLocal: null }]
       : checkSlots(answer).map((s) => ({ status: s.status, startLocal: s.startLocal, endLocal: s.endLocal }));
   const now = Date.now();
+  const intervals = dayIntervals(day, rows.map((row) => ({ ...row, tz })));
   const inserts = rows.map((row, slot) => {
-    const interval = answerInterval(day, { ...row, tz }, user.defaultSessionMinutes);
+    const interval = intervals[slot];
     return db.insert(schema.availabilityEntries).values({
       id: crypto.randomUUID(),
       userId: user.id,
@@ -474,9 +477,16 @@ export async function shiftToday(db: Db, user: SessionUser, minutes: number, sou
   if (current.kind === "unknown" || current.slots.length === 0) {
     throw new UserError("You haven't said you're playing today yet. Use Plan my week first.");
   }
-  const intervals = current.slots.map((s) => answerInterval(day, s, user.defaultSessionMinutes));
-  const found = intervals.findIndex((i) => i !== null && i.end > now);
-  const index = found === -1 ? current.slots.length - 1 : found;
+  // The slot you're in, else the next one coming up, else the last one. A slot "until late" only
+  // counts as the one you're in for its first hour: otherwise an open midday slot would swallow
+  // the evening.
+  const windows = current.slots.map((s) => {
+    const i = answerInterval(day, s);
+    return i && isOpenEnd(s) ? { start: i.start, end: i.start + HOUR } : i;
+  });
+  const inside = windows.findIndex((w) => w !== null && w.start <= now && now < w.end);
+  const upcoming = windows.findIndex((w) => w !== null && w.start > now);
+  const index = inside !== -1 ? inside : upcoming !== -1 ? upcoming : current.slots.length - 1;
   const slot = current.slots[index]!;
   const lastShift = Math.max(0, ...current.entries.map((e) => e.lastRelativeShiftAt ?? 0));
   if (now - lastShift < DOUBLE_TAP_MS) {
@@ -514,8 +524,8 @@ export async function sharedGroupNames(db: Db, userId: string): Promise<string[]
 // ── Group week ───────────────────────────────────────────────────────────────────────────
 
 /**
- * One Yes/Maybe time. An answer without an end time ("until late") still gets an `endsAt`
- * (start + the member's usual session length) for the overlap maths; `openEnd` says to show it as "late".
+ * One Yes/Maybe time. An answer without an end time ("until late") runs until their next slot or
+ * the end of the night for the overlap maths; `openEnd` says to show it as "late".
  */
 export type MemberSlot = { status: "yes" | "maybe"; startsAt: number; endsAt: number; openEnd: boolean };
 
@@ -677,9 +687,16 @@ async function loadWeek(db: Db, group: Group, days: LocalDate[]): Promise<WeekVi
             ),
           );
           if (visible.length === 0) return hidden;
-          const slots = visible
-            .filter((e) => e.status !== "no" && e.startsAt !== null && e.endsAt !== null)
-            .map((e) => ({ status: e.status as "yes" | "maybe", startsAt: e.startsAt!, endsAt: e.endsAt!, openEnd: isOpenEnd(e) }))
+          // Worked out from the answers, not the stored times, so rule changes apply to old answers too.
+          const playing = visible.filter((e) => e.status !== "no");
+          const intervals = dayIntervals(day, playing.map(answerOf));
+          const slots = playing
+            .flatMap((e, i) => {
+              const interval = intervals[i];
+              return interval
+                ? [{ status: e.status as "yes" | "maybe", startsAt: interval.start, endsAt: interval.end, openEnd: isOpenEnd(e) }]
+                : [];
+            })
             .sort((a, b) => a.startsAt - b.startsAt);
           return {
             ...hidden,
@@ -693,8 +710,9 @@ async function loadWeek(db: Db, group: Group, days: LocalDate[]): Promise<WeekVi
         }
         const fallback = resolveEffective(day, [], defaults.get(m.userId) ?? {});
         if (fallback.kind === "unknown" || !visibleInGroup(groupId, membership, null)) return hidden;
-        const slots = fallback.slots.flatMap((s) => {
-          const interval = answerInterval(day, s, m.defaultSessionMinutes);
+        const intervals = dayIntervals(day, fallback.slots);
+        const slots = fallback.slots.flatMap((s, i) => {
+          const interval = intervals[i];
           return interval
             ? [{ status: s.status as "yes" | "maybe", startsAt: interval.start, endsAt: interval.end, openEnd: isOpenEnd(s) }]
             : [];
