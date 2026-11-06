@@ -77,10 +77,12 @@ function sharedLine(sharedWith: string[]): string {
     : "-# Not shared with any group yet. Join or create one on the website.";
 }
 
-/** "<@123> 20:30" when we know their Discord id, else their name. Mentions never ping (allowed_mentions). */
-function who(m: MemberDay, tz: string, mentions?: Map<string, string>): string {
-  const id = m.userId ? mentions?.get(m.userId) : undefined;
-  const name = id ? `<@${id}>` : `**${m.displayName}**`;
+/**
+ * "**Bo** 20:30". Plain names, not mentions: Discord shows a mention of someone it hasn't loaded
+ * as @unknown-user, and that happens often enough to be confusing.
+ */
+function who(m: MemberDay, tz: string): string {
+  const name = `**${m.displayName}**`;
   const times = m.slots?.length ? m.slots.map((s) => timeIn(s.startsAt, tz)) : m.startsAt !== null ? [timeIn(m.startsAt, tz)] : [];
   const maybe = m.status === "maybe" ? " (maybe)" : "";
   return `${name}${times.length ? ` ${times.join(" & ")}` : ""}${maybe}`;
@@ -310,8 +312,6 @@ export type BoardInput = {
   minPlayers: number;
   days: DayView[];
   freeNow: FreeNowView[];
-  /** Our user id → Discord user id, for clickable names. */
-  mentions: Map<string, string>;
   websiteUrl: string;
 };
 
@@ -331,7 +331,7 @@ export function boardMessage(input: BoardInput): MessagePayload {
     // Who's playing today and tomorrow; later days only show how many ("Who's on?" has the names).
     if (i <= 1) {
       const playing = d.members.filter((m) => m.status === "yes" || m.status === "maybe");
-      if (playing.length > 0) lines.push(`> ${playing.map((m) => who(m, tz, input.mentions)).join("  ·  ")}`);
+      if (playing.length > 0) lines.push(`> ${playing.map((m) => who(m, tz)).join("  ·  ")}`);
     }
   });
 
@@ -350,7 +350,7 @@ export function boardMessage(input: BoardInput): MessagePayload {
       { type: 2, style: 2, label: "Who's on?", custom_id: `bd:who:${groupId}` },
       { type: 2, style: 5, label: "Website", url: `${input.websiteUrl}/groups/${groupId}` },
     ),
-    text(`-# Click a name to open their profile and message them. Nobody gets pinged. "Who's on?" shows any day.`),
+    text(`-# Updates by itself. Nobody gets pinged. "Who's on?" shows any day.`),
   ]);
   return { ...message, allowed_mentions: { parse: [] } };
 }
@@ -360,13 +360,12 @@ export type WhoInput = { groupName: string; day: DayView; freeNow: FreeNowView[]
 const MAX_WHO_GROUPS = 10;
 
 /**
- * Who's playing on one day, per group, with clickable names. `pick` adds a day picker
+ * Who's playing on one day, per group. `pick` adds a day picker
  * (custom_id prefix + the days to offer) so people can look at other evenings.
  */
 export function whoMessage(
   groups: WhoInput[],
   tz: string,
-  mentions: Map<string, string> = new Map(),
   pick?: { customId: string; days: LocalDate[]; selected: LocalDate },
 ): MessagePayload {
   const title = !pick
@@ -388,7 +387,7 @@ export function whoMessage(
             ? `starts \`${timeIn(d.best.startsAt, tz)}\` · ${note(d, d.members.length)}`
             : note(d, d.members.length);
           const lines = [`**${g.groupName}** · ${best}`];
-          lines.push(playing.length > 0 ? playing.map((m) => who(m, tz, mentions)).join("  ·  ") : "Nobody has said yes yet.");
+          lines.push(playing.length > 0 ? playing.map((m) => who(m, tz)).join("  ·  ") : "Nobody has said yes yet.");
           const small = [
             ...(out.length > 0 ? [`Can't play: ${out.join(", ")}`] : []),
             ...(unknown.length > 0 ? [`No answer: ${unknown.join(", ")}`] : []),

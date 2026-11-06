@@ -182,9 +182,7 @@ describe("board and who", () => {
     counts: { yes: 1, maybe: 1, no: 1, unknown: 1 },
     best: { startsAt: at("2026-10-28T20:00:00Z"), memberIds: ["u1", "u2"], includesMaybe: true },
   };
-  const mentions = new Map([["u1", "111111111111"]]);
-
-  it("puts one line per day on the board, with clickable names for today and tomorrow only", () => {
+  it("puts one line per day on the board, with names for today and tomorrow only", () => {
     const m = boardMessage({
       groupId: "g1",
       groupName: "The Dads",
@@ -192,7 +190,6 @@ describe("board and who", () => {
       minPlayers: 2,
       days: [day, { ...day, day: "2026-10-29" }, { ...day, day: "2026-10-30" }],
       freeNow: [{ displayName: "Carsten", until: at("2026-10-28T21:30:00Z") }],
-      mentions,
       websiteUrl: "https://example.test",
     });
     expect(m.flags).toBe(COMPONENTS_V2);
@@ -201,8 +198,9 @@ describe("board and who", () => {
     const strip = [BOARD_DOT.yes, BOARD_DOT.maybe, BOARD_DOT.no, BOARD_DOT.unknown].join("");
     expect(text).toContain(`\`Today  ~21:00\`  ${strip}  2 with Maybes`);
     expect(text).toContain("`Thu 29 ~21:00`");
-    expect(text).toContain("> <@111111111111> 20:30  ·  **Bo** 21:00 (maybe)");
-    expect(text.match(/<@111111111111>/g)).toHaveLength(2);
+    expect(text).toContain("> **Anders** 20:30  ·  **Bo** 21:00 (maybe)");
+    expect(text.split("**Anders**")).toHaveLength(3);
+    expect(text).not.toContain("<@");
     expect(text).toContain("`Fri 30 ~21:00`");
     expect(text).toContain("**Carsten** is free right now, until 22:30");
     expect(text).not.toContain("Hidden");
@@ -211,14 +209,14 @@ describe("board and who", () => {
   });
 
   it("shows who's on in the viewer's time zone with a day picker", () => {
-    const m = whoMessage([{ groupName: "The Dads", day, freeNow: [] }], "Europe/London", mentions, {
+    const m = whoMessage([{ groupName: "The Dads", day, freeNow: [] }], "Europe/London", {
       customId: "wd:g1",
       days: ["2026-10-28", "2026-10-29"],
       selected: "2026-10-28",
     });
     const text = cardText(m);
     expect(text).toContain("Who's on today");
-    expect(text).toContain("<@111111111111> 19:30");
+    expect(text).toContain("**Anders** 19:30");
     expect(text).toContain("Can't play: Frank");
     expect(text).toContain("No answer: Hidden");
     expect(text).toContain("Times in Europe/London");

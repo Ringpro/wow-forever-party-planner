@@ -24,7 +24,6 @@ async function loadBoard(db: Db, groupId: string) {
     minPlayers: week.group.minPlayers,
     days: week.days,
     freeNow: week.freeNow,
-    mentions,
     websiteUrl: env.PUBLIC_BASE_URL,
   });
   return { week, mentions, message };

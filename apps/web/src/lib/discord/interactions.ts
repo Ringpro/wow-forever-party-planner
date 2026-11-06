@@ -27,7 +27,7 @@ import { syncFromInteraction } from "../server/discord-sync.ts";
 import { boardForChannel, refreshBoardsFor, removeBoard, setupBoard } from "../server/boards.ts";
 import { getGroupAsMember, listMyGroups, setGameOnPosts, setWeeklyNudge } from "../server/groups.ts";
 import type { SessionUser } from "../server/session.ts";
-import { UserError, discordIdsFor, findOrCreateDiscordUser, getUser, setTimezone } from "../server/users.ts";
+import { UserError, findOrCreateDiscordUser, getUser, setTimezone } from "../server/users.ts";
 import {
   InteractionType,
   Permission,
@@ -203,22 +203,19 @@ async function delayToday(ctx: InteractionContext, actor: SessionUser & { timezo
   return reply(delayMessage({ ...result, sharedWith: await sharedGroupNames(ctx.db, actor.id) }));
 }
 
-/** Who's playing on one day, with clickable names and a picker for other days. */
+/** Who's playing on one day, with a picker for other days. */
 async function whoOn(ctx: InteractionContext, actor: SessionUser & { timezone: string }, scope: string, day?: string) {
   const days = planningDays(actor.timezone);
   const selected = day && days.includes(day) ? day : days[0]!;
   const groupIds = scope === "all" ? (await listMyGroups(ctx.db, actor.id)).map((g) => g.id) : [scope];
   const groups = [];
-  const memberIds = new Set<string>();
   for (const groupId of groupIds) {
     const week = await groupWeek(ctx.db, actor, groupId, [selected]);
     const groupDay = week?.days[0];
     if (!week || !groupDay) continue;
     groups.push({ groupName: week.group.name, day: groupDay, freeNow: selected === days[0] ? week.freeNow : [] });
-    for (const m of week.members) memberIds.add(m.userId);
   }
-  const mentions = await discordIdsFor(ctx.db, [...memberIds]);
-  return whoMessage(groups, actor.timezone, mentions, { customId: `wd:${scope}`, days, selected });
+  return whoMessage(groups, actor.timezone, { customId: `wd:${scope}`, days, selected });
 }
 
 /** Board buttons only work for members of the board's group. */
